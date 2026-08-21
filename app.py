@@ -6,8 +6,8 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Registry PDF → Excel", layout="wide")
-st.title("Registry PDF → Excel — Big File V2")
-st.caption("Low-memory processing + Hindi glyph recovery + deed-wise party rules")
+st.title("Registry PDF → Excel — Big File V3")
+st.caption("Big PDF mode + Hindi recovery + full Excel/CSV export")
 
 uploaded = st.file_uploader("PDF चुनें", type=["pdf"])
 REPH = "\ue000"
@@ -347,10 +347,42 @@ if uploaded:
         output.seek(0)
 
         status.success(f"Done — {len(records)} unique registries")
-        st.dataframe(df.head(25),use_container_width=True)
-        st.download_button("Excel Download करें",data=output,
-            file_name=uploaded.name.rsplit(".",1)[0]+"_registry.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        # Earlier the app displayed only df.head(25). If the table's built-in
+        # CSV export was used, only those preview rows were exported.
+        c1, c2, c3 = st.columns(3)
+        c1.metric("PDF Pages", total)
+        c2.metric("Printed Registry/Area Blocks", raw_count)
+        c3.metric("Unique Registries", len(records))
+
+        st.info(
+            f"कुल {len(records)} unique registry rows तैयार हैं। "
+            "नीचे सिर्फ preview दिखाई गई है; पूरी file के लिए Full Excel / Full CSV buttons इस्तेमाल करें।"
+        )
+
+        preview_n = min(100, len(df))
+        st.subheader(f"Preview — first {preview_n} of {len(df)} rows")
+        st.dataframe(df.head(preview_n), use_container_width=True, hide_index=True)
+
+        full_csv = df.to_csv(index=False).encode("utf-8-sig")
+
+        b1, b2 = st.columns(2)
+        with b1:
+            st.download_button(
+                "⬇️ Full Excel Download करें",
+                data=output,
+                file_name=uploaded.name.rsplit(".",1)[0] + "_registry.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        with b2:
+            st.download_button(
+                "⬇️ Full CSV Download करें",
+                data=full_csv,
+                file_name=uploaded.name.rsplit(".",1)[0] + "_registry.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
     except Exception as e:
         st.error(f"Error: {e}")
         st.exception(e)
