@@ -7,13 +7,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>Registry PDF → Excel — V4 Hindi Safe</title>
+  <title>Registry PDF → Excel — V5 Speed Hindi</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main class="wrap">
     <section class="card hero">
-      <h1>Registry PDF → Excel — V4 Hindi Safe</h1>
+      <h1>Registry PDF → Excel — V5 Speed Hindi</h1>
       <p>PDF आपके browser में process होती है। कोई PDF या निकाला गया data server पर upload/save नहीं किया जाता।</p>
     </section>
 
@@ -27,7 +27,7 @@
       <div style="margin:12px 0;padding:10px;border:1px solid #bbb;border-radius:10px">
         <label style="display:flex;gap:8px;align-items:flex-start">
           <input id="ocrMode" type="checkbox" checked style="margin-top:4px">
-          <span><b>Hindi Safe OCR</b> — केवल उन party/address/witness fields पर OCR चलेगा जिनमें PDF font से टूटे हुए अक्षर मिलें। यह mode धीमा है, पर original visual Hindi पढ़ने की कोशिश करता है।</span>
+          <span><b>V5 Speed Hindi</b> — OCR केवल नए/अलग टूटे हुए Hindi text पर एक बार चलेगा। वही text दोबारा मिलने पर cached result तुरंत लगाया जाएगा।</span>
         </label>
       </div>
       <div class="actions">
@@ -116,7 +116,7 @@ startBtn.addEventListener('click', processPdf);
 excelBtn.addEventListener('click', downloadExcel);
 
 function resetAll(){
-  rows = []; rawRows = []; stopped = false; totalPages = 0;
+  rows = []; rawRows = []; stopped = false; totalPages = 0; ocrCache.clear();
   progressEl.value = 0; pageStat.textContent = '0/0'; recordStat.textContent='0'; reviewStat.textContent='0';
   excelBtn.disabled = true; clearBtn.disabled = true;
   renderPreview();
@@ -364,13 +364,21 @@ async function applyHindiOcrToPage(page, pageRows, pageNo){
   for(const row of pageRows){
     for(const [header,box] of Object.entries(row.__ocrTargets||{})){
       const value=row[header]||'';
-      if(value && containsSuspiciousChars(value) && box) candidates.push({row,header,box,raw:value});
+      if(value && containsSuspiciousChars(value) && box){
+        const key=cleanText(value);
+        if(ocrCache.has(key)){
+          const cached=ocrCache.get(key);
+          if(cached) row[header]=cached;
+        }else{
+          candidates.push({row,header,box,raw:value,key});
+        }
+      }
     }
   }
   if(!candidates.length) return;
 
   // Render once per page. OCR only tiny suspicious field rectangles from this canvas.
-  const scale=3.0;
+  const scale=2.25; // faster render; enough for these report fonts
   const viewport=page.getViewport({scale});
   const canvas=document.createElement('canvas');
   canvas.width=Math.ceil(viewport.width); canvas.height=Math.ceil(viewport.height);
@@ -386,10 +394,13 @@ async function applyHindiOcrToPage(page, pageRows, pageNo){
     try{
       const out=await ocrField(canvas,viewport,c.box);
       const cleaned=cleanText(out.text);
-      if(cleaned && /[\u0900-\u097F]/.test(cleaned) && !containsSuspiciousChars(cleaned) && out.confidence>=55){
+      if(cleaned && /[\u0900-\u097F]/.test(cleaned) && !containsSuspiciousChars(cleaned) && out.confidence>=45){
         c.row[c.header]=cleaned;
+        ocrCache.set(c.key, cleaned);
         c.row.Review=cleanText([c.row.Review,`OCR ${c.header} (${Math.round(out.confidence)}%)`].filter(Boolean).join('; '));
       }else{
+        // Cache failure too, so the same broken string does not waste OCR time thousands of times.
+        ocrCache.set(c.key, '');
         c.row.Review=cleanText([c.row.Review,`OCR check ${c.header} low/uncertain (${Math.round(out.confidence)}%)`].filter(Boolean).join('; '));
       }
     }catch(e){
@@ -429,7 +440,7 @@ async function processPdf(){
       pageStat.textContent=`${p}/${totalPages}`;
       recordStat.textContent=String(rows.length);
       reviewStat.textContent=String(rows.filter(r=>r.Review).length);
-      statusEl.textContent=`Page ${p} / ${totalPages} — ${rows.length} records मिले`;
+      statusEl.textContent=`Page ${p} / ${totalPages} — ${rows.length} records — Hindi cache ${ocrCache.size}`;
 
       if(p<=5 || p%50===0) renderPreview();
       if(p%20===0) await new Promise(r=>setTimeout(r,0)); // keep UI responsive on very large PDFs
