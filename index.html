@@ -1,499 +1,88 @@
 <!doctype html>
 <html lang="hi">
 <head>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="light dark" />
-  <title>Registry PDF → Excel — V5 Speed Hindi</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <main class="wrap">
-    <section class="card hero">
-      <h1>Registry PDF → Excel — V5 Speed Hindi</h1>
-      <p>PDF आपके browser में process होती है। कोई PDF या निकाला गया data server पर upload/save नहीं किया जाता।</p>
-    </section>
-
-    <section class="card">
-      <label class="filebox" for="pdfFile">
-        <span class="filetitle">PDF चुनें</span>
-        <span id="fileName" class="muted">3500+ pages की text-based report भी चुन सकते हैं</span>
-        <input id="pdfFile" type="file" accept="application/pdf,.pdf" />
-      </label>
-
-      <div style="margin:12px 0;padding:10px;border:1px solid #bbb;border-radius:10px">
-        <label style="display:flex;gap:8px;align-items:flex-start">
-          <input id="ocrMode" type="checkbox" checked style="margin-top:4px">
-          <span><b>V5 Speed Hindi</b> — OCR केवल नए/अलग टूटे हुए Hindi text पर एक बार चलेगा। वही text दोबारा मिलने पर cached result तुरंत लगाया जाएगा।</span>
-        </label>
-      </div>
-      <div class="actions">
-        <button id="startBtn" class="primary" disabled>PDF Process करें</button>
-        <button id="stopBtn" class="danger" disabled>रोकें</button>
-        <button id="excelBtn" class="success" disabled>Excel Download करें</button>
-      </div>
-
-      <div id="status" class="status">PDF चुनें।</div>
-      <progress id="progress" value="0" max="100"></progress>
-      <div class="stats">
-        <span>Pages: <b id="pageStat">0/0</b></span>
-        <span>Records: <b id="recordStat">0</b></span>
-        <span>Review: <b id="reviewStat">0</b></span>
-      </div>
-    </section>
-
-    <section class="card note">
-      <h2>Excel में क्या आएगा</h2>
-      <p>Registry No, Registry Year, Book No, Village, Transaction Value, Market Value, Deed Name, First Party, Second Party, Address और Witness. <b>Area जानबूझकर नहीं लिया जाएगा।</b></p>
-      <p>किसी field का text PDF में नहीं मिला तो cell खाली रहेगा। Hindi text को spell-correct/translate नहीं किया जाता। टूटे font वाले field में Hindi Safe OCR visual text पढ़ता है; original raw extraction Excel की दूसरी sheet में भी रखी जाती है।</p>
-    </section>
-
-    <section class="card tablecard">
-      <div class="tablehead">
-        <h2>Preview</h2>
-        <button id="clearBtn" class="ghost" disabled>Clear</button>
-      </div>
-      <div class="tablewrap">
-        <table id="previewTable">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <p class="muted small">Preview में सिर्फ शुरुआती records दिखते हैं; Excel में सभी records जाएंगे।</p>
-    </section>
-  </main>
-
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
-  <script type="module">
-import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.mjs';
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.mjs';
-
-const $ = (id) => document.getElementById(id);
-const fileInput = $('pdfFile');
-const startBtn = $('startBtn');
-const stopBtn = $('stopBtn');
-const excelBtn = $('excelBtn');
-const clearBtn = $('clearBtn');
-const statusEl = $('status');
-const progressEl = $('progress');
-const pageStat = $('pageStat');
-const recordStat = $('recordStat');
-const reviewStat = $('reviewStat');
-const fileName = $('fileName');
-const table = $('previewTable');
-const ocrMode = $('ocrMode');
-
-let selectedFile = null;
-let rows = [];
-let stopped = false;
-let totalPages = 0;
-let ocrWorker = null;
-let rawRows = [];
-
-const HEADERS = [
-  'Registry No','Registry Year','Book No','Village',
-  'Transaction Value','Market Value','Deed Name',
-  'First Party 1','First Party 1 Address','First Party 2','First Party 2 Address',
-  'First Party 3','First Party 3 Address','First Party 4','First Party 4 Address',
-  'Second Party 1','Second Party 1 Address','Second Party 2','Second Party 2 Address',
-  'Second Party 3','Second Party 3 Address','Second Party 4','Second Party 4 Address',
-  'Witness 1','Witness 2','Witness 3','Witness 4','Review'
-];
-
-fileInput.addEventListener('change', () => {
-  selectedFile = fileInput.files?.[0] || null;
-  fileName.textContent = selectedFile ? `${selectedFile.name} — ${(selectedFile.size/1024/1024).toFixed(2)} MB` : 'PDF चुनें';
-  startBtn.disabled = !selectedFile;
-});
-
-clearBtn.addEventListener('click', resetAll);
-stopBtn.addEventListener('click', () => { stopped = true; statusEl.textContent = 'Processing रोकने का अनुरोध किया गया…'; });
-startBtn.addEventListener('click', processPdf);
-excelBtn.addEventListener('click', downloadExcel);
-
-function resetAll(){
-  rows = []; rawRows = []; stopped = false; totalPages = 0; ocrCache.clear();
-  progressEl.value = 0; pageStat.textContent = '0/0'; recordStat.textContent='0'; reviewStat.textContent='0';
-  excelBtn.disabled = true; clearBtn.disabled = true;
-  renderPreview();
-  statusEl.textContent = selectedFile ? 'PDF तैयार है।' : 'PDF चुनें।';
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Registry PDF → Excel V6 Big File</title>
+<style>
+body{font-family:system-ui,-apple-system,"Noto Sans Devanagari",Arial,sans-serif;background:#f5f7fb;margin:0;color:#172033}.wrap{max-width:900px;margin:auto;padding:18px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 3px 18px #00000010}h1{font-size:30px;margin:0 0 8px}.drop{border:2px dashed #8b96a5;border-radius:16px;padding:28px;text-align:center}.btn{border:0;border-radius:12px;padding:14px 18px;font-size:17px;font-weight:700;margin:8px 6px 0 0}.blue{background:#1769e0;color:white}.green{background:#168a52;color:white}.red{background:#d95b64;color:white}.btn:disabled{opacity:.45}.bar{height:12px;background:#e6eaf0;border-radius:99px;overflow:hidden;margin:15px 0}.bar>div{height:100%;width:0;background:#1769e0}.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:16px}.small{color:#667085;font-size:14px}.warn{background:#fff7e8;border:1px solid #f2d59a;padding:12px;border-radius:12px}.ok{background:#eaf8ef;border:1px solid #b9e4c8;padding:12px;border-radius:12px}.mono{font-family:ui-monospace,monospace}.check{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid #d9dee7;border-radius:12px;margin-top:12px}input[type=file]{max-width:100%}
+</style>
+</head><body><div class="wrap">
+<div class="card"><h1>Registry PDF → Excel — V6 Big File</h1><div class="small">2163/3500+ page Index Report के लिए। Area भी Excel में आएगा। PDF browser में ही process होती है।</div></div>
+<div class="card">
+<div class="drop"><b>PDF चुनें</b><br><br><input id="pdfFile" type="file" accept="application/pdf"></div>
+<label class="check"><input id="hindiFix" type="checkbox" checked><span><b>Selective Hindi Fix</b><br><span class="small">पहले पूरी PDF fast text से निकलेगी। OCR केवल garbled Hindi वाले party-name blocks पर चलेगा; हर field/page पर नहीं।</span></span></label>
+<button id="process" class="btn blue">PDF Process करें</button><button id="stop" class="btn red" disabled>रोकें</button><button id="download" class="btn green" disabled>Excel Download करें</button>
+<div id="msg" class="warn" style="margin-top:14px">PDF चुनें।</div><div class="bar"><div id="bar"></div></div>
+<div class="stats"><span>Pages: <b id="pages">0/0</b></span><span>Rows: <b id="rows">0</b></span><span>Hindi Review: <b id="review">0</b></span></div>
+</div>
+<div class="card"><b>Excel columns</b><div class="small">Registry No, Registry Year, Book No, Village, Area, Transaction Value, Market Value, Deed Name, dynamic First Party + Address columns, dynamic Second Party + Address columns, dynamic Witness columns, Source Pages, Review.</div></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script type="module">
+import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+const $=id=>document.getElementById(id); let STOP=false, OUT=[], pdfDoc=null, ocrWorker=null;
+const badHindi=s=>/[\u0080-\u009fȀ-ɏǀ-ǿ×Þ]/.test(s||'') || ((s||'').match(/[\u0900-\u097F]/g)||[]).length>0 && /[ǕǓȡȢÛġ]/.test(s||'');
+const clean=s=>(s||'').replace(/\s+/g,' ').replace(/\s+([,.;:])/g,'$1').trim();
+const deedFix=s=>clean(s).replace(/CONVEYANC\s+E/gi,'CONVEYANCE').replace(/TRANSFER\s+OF\s+IMMOVABLE\s+PROPERTY/gi,'TRANSFER OF IMMOVABLE PROPERTY');
+const regRe=/^(\d{1,7})\/(\d{4}-\d{4})\/(\d+)$/;
+function groupLines(items){
+ const arr=items.filter(i=>i.str&&i.str.trim()).map(i=>({t:i.str.trim(),x:i.transform[4],y:i.transform[5],w:i.width||0,h:Math.abs(i.height||10)})).sort((a,b)=>Math.abs(b.y-a.y)>2?b.y-a.y:a.x-b.x);
+ const lines=[]; for(const it of arr){let l=lines.find(z=>Math.abs(z.y-it.y)<=2.2); if(!l){l={y:it.y,items:[]};lines.push(l)} l.items.push(it)}
+ for(const l of lines)l.items.sort((a,b)=>a.x-b.x); return lines.sort((a,b)=>b.y-a.y);
 }
-
-function cleanText(s){
-  return String(s ?? '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
-function containsSuspiciousChars(s){
-  // Whitelist normal ASCII + Devanagari. Old broken Mangal mappings often leak
-  // Latin-Extended/C1 characters such as , Ǒ, Ē, Ȣ, Û, à, etc.
-  return /[^\u0009\u000A\u000D\u0020-\u007E\u0900-\u097F\u200B\u200C\u200D\u20B9]/.test(s || '');
-}
-
-function unionBox(items){
-  const a=(items||[]).filter(Boolean);
-  if(!a.length) return null;
-  const x0=Math.min(...a.map(i=>i.x));
-  const x1=Math.max(...a.map(i=>i.x+(i.w||0)));
-  const y0=Math.min(...a.map(i=>i.y-(i.h||10)*0.40));
-  const y1=Math.max(...a.map(i=>i.y+(i.h||10)*0.95));
-  return {x0:x0-4,x1:x1+4,y0:y0-4,y1:y1+4};
-}
-
-function stripPartyLabel(text){
-  return cleanText(String(text||'')
-    .replace(/^First\s+Party\s*[:：]?\s*/i,'')
-    .replace(/^Second\s+Party\s*[:：]?\s*/i,'')
-    .replace(/^Witness\s*[:：]?\s*/i,''));
-}
-
-async function ensureOcrWorker(){
-  if(ocrWorker) return ocrWorker;
-  if(!window.Tesseract) throw new Error('Hindi OCR library load नहीं हुई। Internet connection check करें।');
-  statusEl.textContent='Hindi OCR model (Hindi + English) पहली बार load हो रहा है…';
-  ocrWorker = await Tesseract.createWorker(['hin','eng'], 1, {
-    logger: m => {
-      if(m?.status && typeof m.progress==='number'){
-        statusEl.textContent=`Hindi OCR: ${m.status} ${Math.round(m.progress*100)}%`;
-      }
-    }
-  });
-  await ocrWorker.setParameters({ preserve_interword_spaces: '1' });
-  return ocrWorker;
-}
-
-function boxToRectangle(box, viewport){
-  if(!box) return null;
-  const p1=viewport.convertToViewportPoint(box.x0, box.y1);
-  const p2=viewport.convertToViewportPoint(box.x1, box.y0);
-  const left=Math.max(0,Math.floor(Math.min(p1[0],p2[0])));
-  const top=Math.max(0,Math.floor(Math.min(p1[1],p2[1])));
-  const right=Math.min(Math.ceil(viewport.width),Math.ceil(Math.max(p1[0],p2[0])));
-  const bottom=Math.min(Math.ceil(viewport.height),Math.ceil(Math.max(p1[1],p2[1])));
-  if(right-left<8 || bottom-top<8) return null;
-  return {left,top,width:right-left,height:bottom-top};
-}
-
-async function ocrField(canvas, viewport, box){
-  const rect=boxToRectangle(box,viewport);
-  if(!rect) return {text:'',confidence:0};
-  const worker=await ensureOcrWorker();
-  const ret=await worker.recognize(canvas,{rectangle:rect});
-  return {text:stripPartyLabel(ret?.data?.text||''), confidence:Number(ret?.data?.confidence||0)};
-}
-
-
-function makeItem(raw){
-  const t = raw.transform;
-  return {
-    str: cleanText(raw.str),
-    x: t[4],
-    y: t[5],
-    w: raw.width || 0,
-    h: raw.height || Math.abs(t[3] || 0)
-  };
-}
-
-function isRegistryAnchor(item){
-  return item.x < 170 && /^\d+\s*\/\s*\d{4}\s*-\s*\d{4}\s*\/\s*\d+$/.test(item.str);
-}
-
-function parseRegistryId(text){
-  const m = text.replace(/\s/g,'').match(/^(\d+)\/(\d{4}-\d{4})\/(\d+)$/);
-  return m ? {no:m[1], year:m[2], book:m[3]} : {no:'',year:'',book:''};
-}
-
-function joinByReadingOrder(items){
-  return cleanText(items
-    .sort((a,b) => Math.abs(b.y-a.y) > 2 ? b.y-a.y : a.x-b.x)
-    .map(i=>i.str).filter(Boolean).join(' '));
-}
-
-function clusterLines(items, tolerance=3.5){
-  const sorted = [...items].sort((a,b)=> b.y-a.y || a.x-b.x);
-  const lines = [];
-  for(const item of sorted){
-    let line = lines.find(l => Math.abs(l.y-item.y) <= tolerance);
-    if(!line){ line={y:item.y, items:[]}; lines.push(line); }
-    line.items.push(item);
+function itemAt(line,re){return line.items.find(i=>re.test(i.t))}
+function starts(line){return line.items.find(i=>regRe.test(i.t))}
+function parsePage(lines,pageNo,pageW,pageH){
+ const startsIdx=[]; lines.forEach((l,i)=>{if(starts(l))startsIdx.push(i)}); const recs=[];
+ for(let z=0;z<startsIdx.length;z++){
+  const a=startsIdx[z], b=z+1<startsIdx.length?startsIdx[z+1]:lines.length; const block=lines.slice(a,b).filter(l=>!l.items.some(i=>/^Page \d+ of/i.test(i.t)||/^Index Report/i.test(i.t)||/^District\s*:/i.test(i.t)));
+  const ri=starts(block[0]); if(!ri)continue; const m=ri.t.match(regRe); const head=block[0].items;
+  // Fixed report bands inferred from actual Index Report layout; scaled by page width.
+  const sx=pageW/842; const bands={v:[145*sx,235*sx],area:[200*sx,315*sx],txn:[300*sx,405*sx],market:[395*sx,490*sx],deed:[455*sx,575*sx],party:545*sx,address:735*sx};
+  const texts=(lo,hi)=>head.filter(i=>i.x>=lo&&i.x<hi&&i!==ri).map(i=>i.t).join(' ');
+  let area=texts(bands.area[0],bands.area[1]); let txn=texts(bands.txn[0],bands.txn[1]); let market=texts(bands.market[0],bands.market[1]);
+  // area recognizer wins over accidental band overlap
+  const allHead=head.map(i=>i.t); const ai=allHead.findIndex(t=>/^(?:\d+(?:\.\d+)?)$/.test(t));
+  const areaToken=head.find(i=>/\b(?:SY|SQ\.?\s*YD|KANAL|MARLA|ACRE|K|M)\b/i.test(i.t));
+  if(areaToken){const prev=head.filter(i=>i.x<areaToken.x).slice(-1)[0]; area=clean((prev&&/^\d/.test(prev.t)?prev.t+' ':'')+areaToken.t)}
+  const nums=head.filter(i=>i.x>ri.x+ri.w&&/^\d+(?:\.\d+)?$/.test(i.t)&&(!area.includes(i.t)||i.t==='0'));
+  if(nums.length){txn=nums[0]?.t||''; market=nums[1]?.t||''}
+  let deedParts=head.filter(i=>i.x>=bands.deed[0]&&i.x<bands.party).map(i=>i.t);
+  // continuation deed words on following lines before first party label
+  for(let k=1;k<Math.min(block.length,5);k++){const li=block[k]; if(li.items.some(i=>/^(First Party|Second Party|Witness)\s*:/i.test(i.t)))break; deedParts.push(...li.items.filter(i=>i.x>=bands.deed[0]&&i.x<bands.party).map(i=>i.t))}
+  let deed=deedFix(deedParts.join(' '));
+  const parties={first:[],second:[],witness:[]}; let cur=null;
+  for(const line of block){
+    const label=line.items.find(i=>/^(First Party|Second Party|Witness)\s*:/i.test(i.t));
+    if(label){const typ=/^First/i.test(label.t)?'first':/^Second/i.test(label.t)?'second':'witness'; const after=line.items.filter(i=>i.x>=label.x+label.w-2); const addr=line.items.filter(i=>i.x>=bands.address); const name=after.filter(i=>i.x<bands.address).map(i=>i.t).join(' ').replace(/^(First Party|Second Party|Witness)\s*:\s*/i,''); cur={type:typ,name:clean(name),address:clean(addr.map(i=>i.t).join(' ')),page:pageNo,yTop:line.y,yBottom:line.y-18,bad:false}; parties[typ].push(cur); continue}
+    if(cur){const vals=line.items.filter(i=>i.x>=bands.party); if(!vals.length)continue; const ad=vals.filter(i=>i.x>=bands.address).map(i=>i.t); const nm=vals.filter(i=>i.x<bands.address).map(i=>i.t); if(nm.length)cur.name=clean(cur.name+' '+nm.join(' ')); if(ad.length)cur.address=clean(cur.address+' '+ad.join(' ')); cur.yBottom=Math.min(cur.yBottom,line.y-8)}
   }
-  lines.sort((a,b)=>b.y-a.y);
-  for(const line of lines) line.items.sort((a,b)=>a.x-b.x);
-  return lines;
+  for(const typ of ['first','second','witness'])for(const p of parties[typ])p.bad=badHindi(p.name);
+  recs.push({registry:m[1],year:m[2],book:m[3],village:clean(texts(bands.v[0],bands.v[1])).replace(area,'').trim(),area:clean(area),txn:clean(txn),market:clean(market),deed,first:parties.first,second:parties.second,witness:parties.witness,pages:[pageNo],pageW,pageH});
+ }
+ return recs;
 }
-
-function textInX(items, minX, maxX){
-  return joinByReadingOrder(items.filter(i=>i.x>=minX && i.x<maxX));
+function sameCore(a,b){return a.registry===b.registry&&a.year===b.year&&a.book===b.book&&clean(a.deed).toUpperCase()===clean(b.deed).toUpperCase()}
+function mergeRecords(all){const out=[]; for(const r of all){let x=out.find(q=>sameCore(q,r)); if(!x){out.push(r);continue} x.pages=[...new Set([...x.pages,...r.pages])]; if(r.area&&!x.area.split(' + ').includes(r.area))x.area=clean(x.area+(x.area?' + ':'')+r.area); if(!x.village&&r.village)x.village=r.village; if(!x.txn&&r.txn)x.txn=r.txn; if(!x.market&&r.market)x.market=r.market; for(const k of ['first','second','witness'])for(const p of r[k])if(!x[k].some(q=>clean(q.name+' '+q.address).toLowerCase()===clean(p.name+' '+p.address).toLowerCase()))x[k].push(p)} return out}
+async function ensureOCR(){if(!ocrWorker){ocrWorker=await Tesseract.createWorker(['hin','eng'],1,{logger:m=>{if(m.status==='recognizing text')$('msg').textContent='Hindi OCR: '+Math.round((m.progress||0)*100)+'%'}})}return ocrWorker}
+async function fixHindiSelective(records){
+ const byPage=new Map(); records.forEach(r=>['first','second','witness'].forEach(k=>r[k].forEach(p=>{if(p.bad){if(!byPage.has(p.page))byPage.set(p.page,[]);byPage.get(p.page).push(p)}})));
+ if(!byPage.size)return; const worker=await ensureOCR(); let done=0;
+ for(const [pn,fields] of byPage){if(STOP)break; const page=await pdfDoc.getPage(pn); const vp=page.getViewport({scale:1.65}); const canvas=document.createElement('canvas');canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height); await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+  // One OCR call per affected page, party-details region only.
+  const x0=Math.floor(vp.width*0.62), crop=document.createElement('canvas'); crop.width=vp.width-x0;crop.height=vp.height;crop.getContext('2d').drawImage(canvas,x0,0,crop.width,crop.height,0,0,crop.width,crop.height);
+  const res=await worker.recognize(crop); const words=res.data.words||[];
+  for(const f of fields){const pdfH=f.pageH||510; const scale=vp.height/pdfH; const top=(pdfH-f.yTop-8)*scale, bottom=(pdfH-f.yBottom+8)*scale; const picked=words.filter(w=>{const cy=(w.bbox.y0+w.bbox.y1)/2; return cy>=top&&cy<=bottom && w.confidence>=35}).sort((a,b)=>Math.abs(a.bbox.y0-b.bbox.y0)>8?a.bbox.y0-b.bbox.y0:a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' '); const c=clean(picked).replace(/^(First Party|Second Party|Witness)\s*:?\s*/i,''); if(c&&(/[\u0900-\u097F]/.test(c)||c.length>2))f.name=c; f.bad=badHindi(f.name)}
+  done++; $('msg').textContent=`Hindi fix ${done}/${byPage.size} affected pages`; await new Promise(r=>setTimeout(r,0));
+ }
 }
+function toRows(records){let mf=0,ms=0,mw=0;records.forEach(r=>{mf=Math.max(mf,r.first.length);ms=Math.max(ms,r.second.length);mw=Math.max(mw,r.witness.length)});return records.map(r=>{const o={'Registry No':r.registry,'Registry Year':r.year,'Book No':r.book,'Village':r.village,'Area':r.area,'Transaction Value':r.txn,'Market Value':r.market,'Deed Name':r.deed}; for(let i=0;i<mf;i++){o[`First Party ${i+1}`]=r.first[i]?.name||'';o[`First Party ${i+1} Address`]=r.first[i]?.address||''}for(let i=0;i<ms;i++){o[`Second Party ${i+1}`]=r.second[i]?.name||'';o[`Second Party ${i+1} Address`]=r.second[i]?.address||''}for(let i=0;i<mw;i++){o[`Witness ${i+1}`]=r.witness[i]?.name||'';o[`Witness ${i+1} Address`]=r.witness[i]?.address||''}o['Source Pages']=r.pages.join(', ');const bad=[...r.first,...r.second,...r.witness].some(p=>p.bad);o['Review']=bad?'CHECK HINDI':'';return o})}
+$('process').onclick=async()=>{const file=$('pdfFile').files[0];if(!file){$('msg').textContent='पहले PDF चुनें।';return} STOP=false;OUT=[];$('process').disabled=true;$('stop').disabled=false;$('download').disabled=true;try{const data=new Uint8Array(await file.arrayBuffer());pdfDoc=await pdfjsLib.getDocument({data,useSystemFonts:true}).promise;$('pages').textContent=`0/${pdfDoc.numPages}`;let raw=[];for(let n=1;n<=pdfDoc.numPages;n++){if(STOP)break;const p=await pdfDoc.getPage(n),tc=await p.getTextContent(),vp=p.getViewport({scale:1});raw.push(...parsePage(groupLines(tc.items),n,vp.width,vp.height));$('pages').textContent=`${n}/${pdfDoc.numPages}`;$('rows').textContent=raw.length;$('bar').style.width=(n/pdfDoc.numPages*70)+'%';$('msg').textContent=`Fast extraction: page ${n}/${pdfDoc.numPages}`;if(n%20===0)await new Promise(r=>setTimeout(r,0))}OUT=mergeRecords(raw);$('rows').textContent=OUT.length;if(!STOP&&$('hindiFix').checked){$('msg').textContent='Selective Hindi fix शुरू…';await fixHindiSelective(OUT)}const rev=OUT.filter(r=>[...r.first,...r.second,...r.witness].some(p=>p.bad)).length;$('review').textContent=rev;$('bar').style.width=STOP?'0%':'100%';$('msg').className=rev?'warn':'ok';$('msg').textContent=STOP?'Processing रोकी गई।':`तैयार: ${OUT.length} registry rows. Hindi review: ${rev}.`; $('download').disabled=!OUT.length}catch(e){console.error(e);$('msg').textContent='Error: '+(e?.message||e)}finally{$('process').disabled=false;$('stop').disabled=true}};
+$('stop').onclick=()=>{STOP=true;$('msg').textContent='रोक रहे हैं…'};
+$('download').onclick=()=>{const rows=toRows(OUT),wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(rows);ws['!freeze']={xSplit:0,ySplit:1};ws['!autofilter']={ref:ws['!ref']};XLSX.utils.book_append_sheet(wb,ws,'Registry Data');const rr=rows.filter(r=>r.Review);if(rr.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rr),'Needs Review');XLSX.writeFile(wb,'registry-extracted-v6.xlsx')};
+</script></body></html>
 
-function pickNumericColumn(items, minX, maxX){
-  const candidates = items.filter(i=>i.x>=minX && i.x<maxX && /^[-+]?\d[\d,]*(?:\.\d+)?$/.test(i.str));
-  return candidates.length ? cleanText(candidates[0].str.replace(/,/g,'')) : '';
-}
-
-function parseParties(items){
-  const partyItems = items.filter(i=>i.x >= 590 && i.x < 980 && i.str && !/^Page$/i.test(i.str));
-  const lines = clusterLines(partyItems, 4.2);
-  const first=[], second=[], witnesses=[];
-  let current = null;
-
-  for(const line of lines){
-    const lineText = cleanText(line.items.map(i=>i.str).join(' '));
-    const left = line.items.filter(i=>i.x < 835);
-    const right = line.items.filter(i=>i.x >= 835);
-    const leftText = cleanText(left.map(i=>i.str).join(' '));
-    const rightText = cleanText(right.map(i=>i.str).join(' '));
-
-    let type = null;
-    if(/^First\s+Party\s*:/i.test(lineText)) type='first';
-    else if(/^Second\s+Party\s*:/i.test(lineText)) type='second';
-    else if(/^Witness\s*:/i.test(lineText)) type='witness';
-
-    if(type){
-      const name = cleanText(leftText.replace(/^First\s+Party\s*:\s*/i,'').replace(/^Second\s+Party\s*:\s*/i,'').replace(/^Witness\s*:\s*/i,''));
-      current = {type, name, address:rightText, nameItems:[...left], addressItems:[...right]};
-      if(type==='first') first.push(current);
-      if(type==='second') second.push(current);
-      if(type==='witness') witnesses.push(current);
-      continue;
-    }
-
-    if(current){
-      if(leftText){ current.name = cleanText(`${current.name} ${leftText}`); current.nameItems.push(...left); }
-      if(rightText){ current.address = cleanText(`${current.address} ${rightText}`); current.addressItems.push(...right); }
-    }
-  }
-  return {first,second,witnesses};
-}
-
-function parseRecord(recordItems, pageNo){
-  const anchor = recordItems.find(isRegistryAnchor);
-  if(!anchor) return null;
-  const id = parseRegistryId(anchor.str);
-
-  // Report columns are fixed in this family of index PDFs.
-  // Area lies roughly x=215..330 and is intentionally ignored.
-  const village = textInX(recordItems.filter(i=>Math.abs(i.y-anchor.y)<16), 145, 215);
-  const transactionValue = pickNumericColumn(recordItems.filter(i=>Math.abs(i.y-anchor.y)<18), 330, 450);
-  const marketValue = pickNumericColumn(recordItems.filter(i=>Math.abs(i.y-anchor.y)<18), 450, 525);
-
-  // Deed names sometimes wrap, e.g. CONVEYANC / E.
-  const deedCandidates = recordItems.filter(i=>i.x>=520 && i.x<590 && i.y <= anchor.y+5 && i.y >= anchor.y-28);
-  let deedName = joinByReadingOrder(deedCandidates);
-  // Join a word split only because the PDF wrapped it, e.g. CONVEYANC + E.
-  if (/^[A-Z]+(?: [A-Z]+)+$/.test(deedName)) deedName = deedName.replace(/ /g,'');
-  const parties = parseParties(recordItems);
-
-  const row = Object.fromEntries(HEADERS.map(h=>[h,'']));
-  row['Registry No']=id.no; row['Registry Year']=id.year; row['Book No']=id.book;
-  row['Village']=village; row['Transaction Value']=transactionValue; row['Market Value']=marketValue; row['Deed Name']=deedName;
-  parties.first.slice(0,4).forEach((p,idx)=>{ row[`First Party ${idx+1}`]=p.name; row[`First Party ${idx+1} Address`]=p.address; });
-  parties.second.slice(0,4).forEach((p,idx)=>{ row[`Second Party ${idx+1}`]=p.name; row[`Second Party ${idx+1} Address`]=p.address; });
-  parties.witnesses.slice(0,4).forEach((p,idx)=>{ row[`Witness ${idx+1}`]=cleanText(`${p.name}${p.address?' '+p.address:''}`); });
-
-  row.__ocrTargets = {};
-  parties.first.slice(0,4).forEach((p,idx)=>{
-    row.__ocrTargets[`First Party ${idx+1}`]=unionBox(p.nameItems);
-    row.__ocrTargets[`First Party ${idx+1} Address`]=unionBox(p.addressItems);
-  });
-  parties.second.slice(0,4).forEach((p,idx)=>{
-    row.__ocrTargets[`Second Party ${idx+1}`]=unionBox(p.nameItems);
-    row.__ocrTargets[`Second Party ${idx+1} Address`]=unionBox(p.addressItems);
-  });
-  parties.witnesses.slice(0,4).forEach((p,idx)=>{
-    row.__ocrTargets[`Witness ${idx+1}`]=unionBox([...(p.nameItems||[]),...(p.addressItems||[])]);
-  });
-
-  const allText = recordItems.map(i=>i.str).join(' ');
-  const notes=[];
-  if(containsSuspiciousChars(allText)) notes.push('PDF font/encoding review');
-  if(parties.first.length>4) notes.push(`First Party ${parties.first.length} (only first 4 columns)`);
-  if(parties.second.length>4) notes.push(`Second Party ${parties.second.length} (only first 4 columns)`);
-  if(parties.witnesses.length>4) notes.push(`Witness ${parties.witnesses.length} (only first 4 columns)`);
-  if(!deedName) notes.push('Deed Name blank');
-  row['Review']=notes.join('; ');
-  row.__page=pageNo;
-  return row;
-}
-
-function splitPageIntoRecords(items, pageNo){
-  const anchors = items.filter(isRegistryAnchor).sort((a,b)=>b.y-a.y);
-  const result=[];
-  for(let i=0;i<anchors.length;i++){
-    const a=anchors[i];
-    const next=anchors[i+1];
-    const top=a.y+8;
-    const bottom=next ? next.y+4 : 70; // footer is below this in this report family
-    // Do NOT impose a fixed upper-Y cutoff: the first record on pages 2+ can sit
-    // above y=540 in PDF.js coordinates. That was skipping 2453/2456/2460/2464.
-    const recItems=items.filter(it=>it.y<=top && it.y>bottom);
-    const rec=parseRecord(recItems,pageNo);
-    if(rec) result.push(rec);
-  }
-  return result;
-}
-
-function mergeSameDeedRows(inputRows){
-  // A deed can occupy more than one physical row when the report lists multiple
-  // area parcels (sample: 2451). User wants deed-wise output, so keep one Excel row.
-  const map = new Map();
-  for(const r of inputRows){
-    const key = `${r['Registry No']}|${r['Registry Year']}|${r['Book No']}`;
-    if(!map.has(key)){ map.set(key,{...r,__sourceRows:1}); continue; }
-    const base=map.get(key); base.__sourceRows=(base.__sourceRows||1)+1;
-    for(const h of HEADERS){
-      if(h==='Review') continue;
-      if(!base[h] && r[h]) base[h]=r[h];
-    }
-    const notes=new Set([...(base.Review||'').split('; ').filter(Boolean), ...(r.Review||'').split('; ').filter(Boolean)]);
-    notes.add(`Merged ${base.__sourceRows} report rows for same deed`);
-    base.Review=[...notes].join('; ');
-  }
-  return [...map.values()];
-}
-
-async function applyHindiOcrToPage(page, pageRows, pageNo){
-  if(!ocrMode?.checked) return;
-  const candidates=[];
-  for(const row of pageRows){
-    for(const [header,box] of Object.entries(row.__ocrTargets||{})){
-      const value=row[header]||'';
-      if(value && containsSuspiciousChars(value) && box){
-        const key=cleanText(value);
-        if(ocrCache.has(key)){
-          const cached=ocrCache.get(key);
-          if(cached) row[header]=cached;
-        }else{
-          candidates.push({row,header,box,raw:value,key});
-        }
-      }
-    }
-  }
-  if(!candidates.length) return;
-
-  // Render once per page. OCR only tiny suspicious field rectangles from this canvas.
-  const scale=2.25; // faster render; enough for these report fonts
-  const viewport=page.getViewport({scale});
-  const canvas=document.createElement('canvas');
-  canvas.width=Math.ceil(viewport.width); canvas.height=Math.ceil(viewport.height);
-  const ctx=canvas.getContext('2d',{alpha:false});
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  await page.render({canvasContext:ctx,viewport}).promise;
-
-  let n=0;
-  for(const c of candidates){
-    if(stopped) break;
-    n++;
-    statusEl.textContent=`Page ${pageNo}/${totalPages} — Hindi OCR field ${n}/${candidates.length}`;
-    try{
-      const out=await ocrField(canvas,viewport,c.box);
-      const cleaned=cleanText(out.text);
-      if(cleaned && /[\u0900-\u097F]/.test(cleaned) && !containsSuspiciousChars(cleaned) && out.confidence>=45){
-        c.row[c.header]=cleaned;
-        ocrCache.set(c.key, cleaned);
-        c.row.Review=cleanText([c.row.Review,`OCR ${c.header} (${Math.round(out.confidence)}%)`].filter(Boolean).join('; '));
-      }else{
-        // Cache failure too, so the same broken string does not waste OCR time thousands of times.
-        ocrCache.set(c.key, '');
-        c.row.Review=cleanText([c.row.Review,`OCR check ${c.header} low/uncertain (${Math.round(out.confidence)}%)`].filter(Boolean).join('; '));
-      }
-    }catch(e){
-      console.warn('OCR field failed',c.header,e);
-      c.row.Review=cleanText([c.row.Review,`OCR failed ${c.header}`].filter(Boolean).join('; '));
-    }
-    await new Promise(r=>setTimeout(r,0));
-  }
-  canvas.width=1; canvas.height=1;
-}
-
-async function processPdf(){
-  if(!selectedFile) return;
-  resetAll(); stopped=false;
-  startBtn.disabled=true; stopBtn.disabled=false; clearBtn.disabled=true;
-  statusEl.textContent='PDF खोली जा रही है…';
-
-  try{
-    const bytes = new Uint8Array(await selectedFile.arrayBuffer());
-    const task = pdfjsLib.getDocument({data:bytes, useSystemFonts:true, isEvalSupported:false});
-    const pdf = await task.promise;
-    totalPages=pdf.numPages;
-    pageStat.textContent=`0/${totalPages}`;
-
-    for(let p=1;p<=totalPages;p++){
-      if(stopped) break;
-      const page=await pdf.getPage(p);
-      const content=await page.getTextContent({includeMarkedContent:false, disableNormalization:true});
-      const items=content.items.filter(x=>x.str).map(makeItem);
-      const pageRows=splitPageIntoRecords(items,p);
-      // Preserve untouched PDF extraction in a separate Excel sheet before OCR fallback.
-      rawRows = mergeSameDeedRows([...rawRows, ...pageRows.map(r=>({...r}))]);
-      await applyHindiOcrToPage(page,pageRows,p);
-      rows = mergeSameDeedRows([...rows, ...pageRows]);
-
-      progressEl.value=Math.round((p/totalPages)*100);
-      pageStat.textContent=`${p}/${totalPages}`;
-      recordStat.textContent=String(rows.length);
-      reviewStat.textContent=String(rows.filter(r=>r.Review).length);
-      statusEl.textContent=`Page ${p} / ${totalPages} — ${rows.length} records — Hindi cache ${ocrCache.size}`;
-
-      if(p<=5 || p%50===0) renderPreview();
-      if(p%20===0) await new Promise(r=>setTimeout(r,0)); // keep UI responsive on very large PDFs
-      page.cleanup();
-    }
-
-    renderPreview();
-    excelBtn.disabled = rows.length===0;
-    clearBtn.disabled=false;
-    statusEl.textContent = stopped
-      ? `Processing रोकी गई। अभी तक ${rows.length} records तैयार हैं।`
-      : `पूरा हुआ: ${totalPages} pages से ${rows.length} records तैयार हैं।`;
-  }catch(err){
-    console.error(err);
-    statusEl.textContent=`Error: ${err?.message || err}`;
-  }finally{
-    startBtn.disabled=false; stopBtn.disabled=true;
-    if(ocrWorker){ try{ await ocrWorker.terminate(); }catch{} ocrWorker=null; }
-  }
-}
-
-function renderPreview(){
-  const shown=rows.slice(0,100);
-  table.tHead.innerHTML=''; table.tBodies[0].innerHTML='';
-  const hr=document.createElement('tr');
-  for(const h of HEADERS){ const th=document.createElement('th'); th.textContent=h; hr.appendChild(th); }
-  table.tHead.appendChild(hr);
-  for(const r of shown){
-    const tr=document.createElement('tr'); if(r.Review) tr.classList.add('review');
-    for(const h of HEADERS){ const td=document.createElement('td'); td.textContent=r[h]??''; tr.appendChild(td); }
-    table.tBodies[0].appendChild(tr);
-  }
-}
-
-function downloadExcel(){
-  if(!rows.length || !window.XLSX) return;
-  const cleanRows=rows.map(r=>Object.fromEntries(HEADERS.map(h=>[h,r[h]??''])));
-  const ws=XLSX.utils.json_to_sheet(cleanRows,{header:HEADERS});
-  ws['!freeze']={xSplit:0,ySplit:1};
-  ws['!cols']=HEADERS.map(h=>({wch: h.includes('Party')||h.includes('Address')||h.includes('Witness')?28: h==='Review'?24:18}));
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Registry Data');
-  if(rawRows.length){
-    const rawClean=rawRows.map(r=>Object.fromEntries(HEADERS.map(h=>[h,r[h]??''])));
-    const rawWs=XLSX.utils.json_to_sheet(rawClean,{header:HEADERS});
-    rawWs['!freeze']={xSplit:0,ySplit:1};
-    rawWs['!cols']=ws['!cols'];
-    XLSX.utils.book_append_sheet(wb,rawWs,'Raw PDF Text');
-  }
-  const base=(selectedFile?.name || 'registry').replace(/\.pdf$/i,'').replace(/[\\/:*?"<>|]+/g,'_');
-  XLSX.writeFile(wb,`${base}_extracted.xlsx`,{compression:true});
-}
-
-</script>
-</body>
-</html>
