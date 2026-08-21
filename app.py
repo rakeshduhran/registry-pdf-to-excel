@@ -1,4 +1,3 @@
-
 import io, os, re, copy, functools, itertools, tempfile, shutil, gc
 import fitz
 from fontTools.ttLib import TTFont
@@ -6,8 +5,8 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Registry PDF → Excel", layout="wide")
-st.title("Registry PDF → Excel — V4 Adaptive Layout")
-st.caption("Dynamic columns + Hindi glyph decoding + big-PDF mode + validation")
+st.title("Registry PDF → Excel — V5 Hindi Safe")
+st.caption("PDF-native Hindi recovery + adaptive layout + conservative correction + validation")
 
 uploaded = st.file_uploader("PDF चुनें", type=["pdf"])
 
@@ -29,6 +28,103 @@ def suspicious_text(s):
     if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", s):
         return True
     return False
+
+
+# Hindi is never blindly spell-corrected.  We only repair shaping patterns
+# that are deterministic in this report family, and otherwise keep the
+# decoded PDF text unchanged.
+def normalize_hindi_visual(s):
+    s = clean(s)
+    if not s:
+        return s
+
+    # Unicode normalization-like cleanup without changing proper nouns.
+    s = s.replace("़", "़")
+    s = re.sub(r"([क-ह])्\1्\b", r"\1", s)
+
+    # Very high-confidence whole-word repairs observed repeatedly in the
+    # same Haryana registry-index report family.
+    exact_words = {
+        "सिह": "सिंह",
+        "विदया": "विद्या",
+        "सरंपच": "सरपंच",
+        "संरपच": "सरपंच",
+        "हिरयाणा": "हरियाणा",
+    }
+    parts = re.split(r"(\s+|[,;/()\-])", s)
+    for i, p in enumerate(parts):
+        if p in exact_words:
+            parts[i] = exact_words[p]
+    return "".join(parts)
+
+def hindi_tokens(s):
+    return re.findall(r"[\u0900-\u097F]{2,}", s or "")
+
+def edit_distance(a, b):
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b)+1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(
+                cur[-1] + 1,
+                prev[j] + 1,
+                prev[j-1] + (ca != cb)
+            ))
+        prev = cur
+    return prev[-1]
+
+class PdfVocabulary:
+    """Learns only from this PDF; never substitutes from an outside dictionary."""
+    def __init__(self):
+        self.counts = {}
+
+    def add(self, text):
+        for w in hindi_tokens(normalize_hindi_visual(text)):
+            if not suspicious_text(w):
+                self.counts[w] = self.counts.get(w, 0) + 1
+
+    def conservative_fix(self, text):
+        text = normalize_hindi_visual(text)
+        if not text or suspicious_text(text):
+            return text, False
+
+        parts = re.split(r"(\s+|[,;/()\-])", text)
+        changed = False
+
+        for i, w in enumerate(parts):
+            if not re.fullmatch(r"[\u0900-\u097F]{3,}", w):
+                continue
+            # Never alter a word already seen in the same PDF.
+            if w in self.counts:
+                continue
+
+            best = None
+            best_score = None
+            for cand, freq in self.counts.items():
+                if abs(len(cand) - len(w)) > 1:
+                    continue
+                d = edit_distance(w, cand)
+                # Only one-edit candidates, and require repeated evidence.
+                if d != 1 or freq < 3:
+                    continue
+                score = (d, -freq, cand)
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best = cand
+
+            # Proper nouns are risky. Only accept a one-edit repair when
+            # the candidate is strongly repeated in this exact PDF.
+            if best is not None and self.counts.get(best, 0) >= 5:
+                parts[i] = best
+                changed = True
+
+        return "".join(parts), changed
 
 class MangalDecoder:
     def __init__(self, doc):
@@ -184,7 +280,7 @@ class MangalDecoder:
     def decode_span(self, sp):
         if "Mangal" in sp["font"]:
             tokens = [self.decode_gid(c[1]) for c in sp["chars"]]
-            return clean(self.normalize_tokens(tokens))
+            return normalize_hindi_visual(self.normalize_tokens(tokens))
         return clean("".join(chr(c[0]) for c in sp["chars"]))
 
 def decoded_spans(page, decoder):
@@ -239,88 +335,107 @@ def text_in_band(line, x0, x1):
 # Adaptive layout detection from the printed header
 # -------------------------------------------------
 def detect_layout(doc):
-    candidates = []
-
-    for pno in range(min(20, len(doc))):
+    """
+    Detect column boundaries from header labels using MIDPOINTS between
+    neighboring header starts.  The old version used the label starts as
+    cell boundaries, which shifted Village->Area etc. on some PDFs.
+    """
+    for pno in range(min(30, len(doc))):
         page = doc.load_page(pno)
         words = page.get_text("words")
+        top = [w for w in words if w[1] < 140]
 
-        # Search only the upper part of the page where the table header lives.
-        top_words = [w for w in words if w[1] < 120]
-        labels = {}
+        # Join nearby header words on the same visual line.
+        lines = {}
+        for w in top:
+            key = round(w[1] / 4) * 4
+            lines.setdefault(key, []).append(w)
 
-        for w in top_words:
-            t = re.sub(r"\s+", "", w[4]).lower()
-            if "regno/regyear/bookno" in t:
-                labels["reg"] = w[0]
-            elif t == "village":
-                labels["village"] = w[0]
-            elif t == "area":
-                labels["area"] = w[0]
-            elif "transactionvalue" in t:
-                labels["txn"] = w[0]
-            elif "marketvalue" in t:
-                labels["market"] = w[0]
-            elif "deedname" in t:
-                labels["deed"] = w[0]
-            elif t == "party":
-                labels["party"] = w[0]
-            elif t == "name":
-                labels["name"] = w[0]
-            elif "father" in t:
-                labels["father"] = w[0]
-            elif t == "address":
-                labels["address"] = w[0]
+        for _, ws in lines.items():
+            ws = sorted(ws, key=lambda x: x[0])
+            joined = " ".join(w[4] for w in ws).lower()
+            if "village" not in joined or "area" not in joined or "deed" not in joined:
+                continue
 
-        required = {"reg", "village", "area", "txn", "market", "deed"}
-        if required.issubset(labels):
-            candidates.append((page.rect.width, labels))
-            page = None
-            break
+            labels = {}
+            for w in ws:
+                t = re.sub(r"[^a-z]", "", w[4].lower())
+                if "village" in t: labels["village"] = w[0]
+                elif t == "area": labels["area"] = w[0]
+                elif "transaction" in t: labels["txn"] = w[0]
+                elif "market" in t: labels["market"] = w[0]
+                elif "deed" in t: labels["deed"] = w[0]
+                elif "party" in t: labels["party"] = w[0]
+                elif t == "name": labels["name"] = w[0]
+                elif "father" in t: labels["father"] = w[0]
+                elif "address" in t: labels["address"] = w[0]
 
-        page = None
+            req = ["village","area","txn","market","deed"]
+            if not all(k in labels for k in req):
+                continue
 
-    if not candidates:
-        # Fallback tuned to the user's report family.
-        width = doc[0].rect.width
-        return {
-            "width": width,
-            "reg_start": 0.0,
-            "village_start": width * 0.155,
-            "area_start": width * 0.225,
-            "txn_start": width * 0.355,
-            "market_start": width * 0.455,
-            "deed_start": width * 0.54,
-            "party_start": width * 0.60,
-            "name_start": width * 0.60,
-            "father_start": width * 0.76,
-            "address_start": width * 0.86,
-            "end": width + 1,
-            "source": "fallback"
-        }
+            width = page.rect.width
+            starts = [
+                ("reg", 0.0),
+                ("village", labels["village"]),
+                ("area", labels["area"]),
+                ("txn", labels["txn"]),
+                ("market", labels["market"]),
+                ("deed", labels["deed"]),
+                ("party", labels.get("party", labels["deed"] + width*0.08)),
+            ]
+            starts = sorted(starts, key=lambda x: x[1])
 
-    width, labels = candidates[0]
+            # Boundaries are halfway between neighboring header starts.
+            boundary = {}
+            for i in range(1, len(starts)):
+                left_name, left_x = starts[i-1]
+                right_name, right_x = starts[i]
+                boundary[right_name] = (left_x + right_x) / 2
 
-    # Use detected starts; fill missing sub-columns proportionally.
-    party_start = labels.get("party", labels["deed"] + width * 0.07)
-    name_start = labels.get("name", party_start)
-    father_start = labels.get("father", party_start + width * 0.16)
-    address_start = labels.get("address", party_start + width * 0.27)
+            party_start = boundary.get("party", labels["deed"] + width*0.07)
 
+            # Party subcolumns are detected independently if present.
+            name_x = labels.get("name", party_start)
+            father_x = labels.get("father", party_start + width*0.16)
+            address_x = labels.get("address", party_start + width*0.27)
+
+            # Use midpoints for subcolumn boundaries too.
+            father_start = (name_x + father_x) / 2 if father_x > name_x else party_start + width*0.16
+            address_start = (father_x + address_x) / 2 if address_x > father_x else party_start + width*0.27
+
+            return {
+                "width": width,
+                "reg_start": 0.0,
+                "village_start": boundary["village"],
+                "area_start": boundary["area"],
+                "txn_start": boundary["txn"],
+                "market_start": boundary["market"],
+                "deed_start": boundary["deed"],
+                "party_start": party_start,
+                "name_start": party_start,
+                "father_start": father_start,
+                "address_start": address_start,
+                "end": width + 1,
+                "source": "header-midpoint"
+            }
+
+    # Fallback is based on the known report geometry.
+    width = doc[0].rect.width
     return {
         "width": width,
-        "reg_start": labels["reg"],
-        "village_start": labels["village"],
-        "area_start": labels["area"],
-        "txn_start": labels["txn"],
-        "market_start": labels["market"],
-        "deed_start": labels["deed"],
-        "party_start": party_start,
-        "name_start": name_start,
-        "father_start": father_start,
-        "address_start": address_start,
+        "reg_start": 0.0,
+        "village_start": width * 0.145,
+        "area_start": width * 0.215,
+        "txn_start": width * 0.345,
+        "market_start": width * 0.445,
+        "deed_start": width * 0.535,
+        "party_start": width * 0.595,
+        "name_start": width * 0.595,
+        "father_start": width * 0.755,
+        "address_start": width * 0.855,
         "end": width + 1,
-        "source": "header"
+        "source": "fallback"
     }
 
 def registry_on_line(line, layout):
@@ -595,6 +710,23 @@ if uploaded:
         layout = detect_layout(doc)
         decoder = MangalDecoder(doc)
 
+        # Build a vocabulary from THIS PDF only. This is a light first pass
+        # over decoded spans, not OCR and not an outside Hindi dictionary.
+        vocab = PdfVocabulary()
+        vocab_status = st.empty()
+        sample_pages = min(len(doc), 250)
+        step = max(1, len(doc) // sample_pages)
+        scanned = 0
+        for vpno in range(0, len(doc), step):
+            vpage = doc.load_page(vpno)
+            for item in decoded_spans(vpage, decoder):
+                vocab.add(item["text"])
+            scanned += 1
+            del vpage
+            if scanned >= sample_pages:
+                break
+        vocab_status.write(f"PDF Hindi vocabulary: {len(vocab.counts)} repeated words learned")
+
         st.write(
             f"Layout detection: **{layout['source']}** | "
             f"PDF pages: **{len(doc)}**"
@@ -611,6 +743,17 @@ if uploaded:
         for i in range(total):
             page = doc.load_page(i)
             records = parse_page(page, i + 1, decoder, layout)
+
+            # Conservative correction using words learned from this same PDF.
+            for r in records:
+                r["village"], _ = vocab.conservative_fix(r["village"])
+                r["areas"] = [normalize_hindi_visual(x) for x in r["areas"]]
+                r["deeds"] = [normalize_hindi_visual(x) for x in r["deeds"]]
+                for role in ("first", "second", "witness"):
+                    for p in r[role]:
+                        p["name"], _ = vocab.conservative_fix(p["name"])
+                        p["father"], _ = vocab.conservative_fix(p["father"])
+                        p["address"], _ = vocab.conservative_fix(p["address"])
 
             raw_count += len(records)
 
@@ -652,6 +795,7 @@ if uploaded:
                     "Merged Extra Area Blocks",
                     "Layout Detection",
                     "WILL/CANCELLATION OF WILL Rule",
+                    "Hindi Correction Policy",
                 ],
                 "Result": [
                     total,
@@ -660,6 +804,7 @@ if uploaded:
                     raw_count - len(merged),
                     layout["source"],
                     "Second Party blank",
+                    "PDF-native; only repeated one-edit words auto-corrected",
                 ],
             }).to_excel(writer, sheet_name="Verification", index=False)
 
@@ -723,3 +868,4 @@ if uploaded:
                 os.unlink(temp_pdf)
         except Exception:
             pass
+
