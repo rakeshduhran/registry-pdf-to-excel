@@ -1,9 +1,11 @@
-Registry PDF → Excel — Big File V2
-Changes:
-uploaded PDF is copied to a temporary file instead of getvalue()
-page-by-page processing
-records are merged incrementally, so all raw page records are not kept twice
-periodic garbage collection
-Excel uses XlsxWriter constant_memory
-conservative Hindi fixes for repeatedly verified glyph-order issues
+Registry PDF → Excel — V4 Adaptive Layout
+Key changes:
+dynamically detects table columns from PDF header
+no hard-coded Village/Area/Transaction positions unless header detection fails
+Mangal glyph decoding for Hindi
+no blind Hindi dictionary correction
+suspicious glyphs go to Needs Review
 WILL and CANCELLATION OF WILL force Second Party blank
+multiple Area rows for the same Registry/Year/Book are merged
+full Excel and full CSV buttons
+normal openpyxl export (no constant_memory cell-loss issue)
