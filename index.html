@@ -1,88 +1,334 @@
 <!doctype html>
 <html lang="hi">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Registry PDF → Excel V6 Big File</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Registry PDF → Excel V7 Layout Safe</title>
 <style>
-body{font-family:system-ui,-apple-system,"Noto Sans Devanagari",Arial,sans-serif;background:#f5f7fb;margin:0;color:#172033}.wrap{max-width:900px;margin:auto;padding:18px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 3px 18px #00000010}h1{font-size:30px;margin:0 0 8px}.drop{border:2px dashed #8b96a5;border-radius:16px;padding:28px;text-align:center}.btn{border:0;border-radius:12px;padding:14px 18px;font-size:17px;font-weight:700;margin:8px 6px 0 0}.blue{background:#1769e0;color:white}.green{background:#168a52;color:white}.red{background:#d95b64;color:white}.btn:disabled{opacity:.45}.bar{height:12px;background:#e6eaf0;border-radius:99px;overflow:hidden;margin:15px 0}.bar>div{height:100%;width:0;background:#1769e0}.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:16px}.small{color:#667085;font-size:14px}.warn{background:#fff7e8;border:1px solid #f2d59a;padding:12px;border-radius:12px}.ok{background:#eaf8ef;border:1px solid #b9e4c8;padding:12px;border-radius:12px}.mono{font-family:ui-monospace,monospace}.check{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid #d9dee7;border-radius:12px;margin-top:12px}input[type=file]{max-width:100%}
+body{font-family:system-ui,-apple-system,"Noto Sans Devanagari",Arial,sans-serif;background:#f5f7fb;margin:0;color:#172033}.wrap{max-width:980px;margin:auto;padding:18px}.card{background:#fff;border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 3px 18px #00000010}h1{font-size:29px;margin:0 0 7px}.small{font-size:14px;color:#667085;line-height:1.45}.drop{border:2px dashed #8b96a5;border-radius:16px;padding:26px;text-align:center}.btn{border:0;border-radius:12px;padding:13px 17px;font-size:16px;font-weight:750;margin:9px 6px 0 0}.blue{background:#1769e0;color:white}.green{background:#168a52;color:white}.orange{background:#d47700;color:#fff}.red{background:#d95b64;color:white}.btn:disabled{opacity:.42}.bar{height:12px;background:#e6eaf0;border-radius:99px;overflow:hidden;margin:15px 0}.bar>div{height:100%;width:0;background:#1769e0}.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:15px}.warn{background:#fff7e8;border:1px solid #f2d59a;padding:12px;border-radius:12px}.ok{background:#eaf8ef;border:1px solid #b9e4c8;padding:12px;border-radius:12px}.info{background:#edf5ff;border:1px solid #bfd7f6;padding:12px;border-radius:12px}.mono{font-family:ui-monospace,monospace}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.pill{border:1px solid #d9dee7;border-radius:12px;padding:11px}.danger{color:#a33}.good{color:#08783f}input[type=file]{max-width:100%}
 </style>
-</head><body><div class="wrap">
-<div class="card"><h1>Registry PDF → Excel — V6 Big File</h1><div class="small">2163/3500+ page Index Report के लिए। Area भी Excel में आएगा। PDF browser में ही process होती है।</div></div>
+</head>
+<body><div class="wrap">
+<div class="card">
+<h1>Registry PDF → Excel — V7 Layout Safe</h1>
+<div class="small">2011c.pdf (1136 pages) और नए Index Report जैसे बड़े files के layout को देखकर बनाया गया। Registry, Village, Area, Transaction Value, Market Value और Deed Name अब PDF की fixed column positions से पढ़े जाते हैं — text guessing से नहीं।</div>
+</div>
 <div class="card">
 <div class="drop"><b>PDF चुनें</b><br><br><input id="pdfFile" type="file" accept="application/pdf"></div>
-<label class="check"><input id="hindiFix" type="checkbox" checked><span><b>Selective Hindi Fix</b><br><span class="small">पहले पूरी PDF fast text से निकलेगी। OCR केवल garbled Hindi वाले party-name blocks पर चलेगा; हर field/page पर नहीं।</span></span></label>
-<button id="process" class="btn blue">PDF Process करें</button><button id="stop" class="btn red" disabled>रोकें</button><button id="download" class="btn green" disabled>Excel Download करें</button>
-<div id="msg" class="warn" style="margin-top:14px">PDF चुनें।</div><div class="bar"><div id="bar"></div></div>
-<div class="stats"><span>Pages: <b id="pages">0/0</b></span><span>Rows: <b id="rows">0</b></span><span>Hindi Review: <b id="review">0</b></span></div>
+<button id="process" class="btn blue">1. Fast Extract</button>
+<button id="hindi" class="btn orange" disabled>2. Hindi Repair (Optional)</button>
+<button id="download" class="btn green" disabled>3. Excel Download</button>
+<button id="stop" class="btn red" disabled>रोकें</button>
+<div id="msg" class="info" style="margin-top:14px">पहले PDF चुनें। Fast Extract में OCR नहीं चलता, इसलिए बड़ी file भी पहले जल्दी structure में निकलेगी।</div>
+<div class="bar"><div id="bar"></div></div>
+<div class="stats">
+<span>Pages: <b id="pages">0/0</b></span>
+<span>Raw records: <b id="raw">0</b></span>
+<span>Unique registries: <b id="rows">0</b></span>
+<span>Hindi review: <b id="review">0</b></span>
+<span>Conflicts: <b id="conflicts">0</b></span>
 </div>
-<div class="card"><b>Excel columns</b><div class="small">Registry No, Registry Year, Book No, Village, Area, Transaction Value, Market Value, Deed Name, dynamic First Party + Address columns, dynamic Second Party + Address columns, dynamic Witness columns, Source Pages, Review.</div></div>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
+<div class="card">
+<b>V7 में क्या बदला</b>
+<div class="grid" style="margin-top:10px">
+<div class="pill"><b>Area exact column</b><div class="small">SY / SM / KM / BG1 सहित पूरा Area cell। एक registry की कई area entries हों तो उसी row में अलग-अलग रखेगा।</div></div>
+<div class="pill"><b>Party sub-columns</b><div class="small">Name, Father's Name और Address को PDF की अलग X-position से पढ़ेगा। First/Second Party labels data में नहीं घुसेंगे।</div></div>
+<div class="pill"><b>Multi-line Deed</b><div class="small">CONVEYANC + E, EXCHANGE OF PROPERTY जैसी टूटे हुए deed names अपने-आप जुड़ेंगे।</div></div>
+<div class="pill"><b>No silent overwrite</b><div class="small">Transaction/Market/Deed में conflicting values मिलें तो दोनों रखकर Review में mark करेगा।</div></div>
+<div class="pill"><b>Hindi audit</b><div class="small">OCR structure नहीं बदलता। केवल खराब Hindi field को उसकी exact geometric cell से repair करता है। Raw PDF text अलग sheet में सुरक्षित रहता है।</div></div>
+<div class="pill"><b>Repeat cache</b><div class="small">एक ही खराब Hindi text दोबारा मिले तो OCR result reuse होगा, बार-बार OCR नहीं चलेगा।</div></div>
+</div>
+</div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script type="module">
 import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
-const $=id=>document.getElementById(id); let STOP=false, OUT=[], pdfDoc=null, ocrWorker=null;
-const badHindi=s=>/[\u0080-\u009fȀ-ɏǀ-ǿ×Þ]/.test(s||'') || ((s||'').match(/[\u0900-\u097F]/g)||[]).length>0 && /[ǕǓȡȢÛġ]/.test(s||'');
-const clean=s=>(s||'').replace(/\s+/g,' ').replace(/\s+([,.;:])/g,'$1').trim();
-const deedFix=s=>clean(s).replace(/CONVEYANC\s+E/gi,'CONVEYANCE').replace(/TRANSFER\s+OF\s+IMMOVABLE\s+PROPERTY/gi,'TRANSFER OF IMMOVABLE PROPERTY');
-const regRe=/^(\d{1,7})\/(\d{4}-\d{4})\/(\d+)$/;
-function groupLines(items){
- const arr=items.filter(i=>i.str&&i.str.trim()).map(i=>({t:i.str.trim(),x:i.transform[4],y:i.transform[5],w:i.width||0,h:Math.abs(i.height||10)})).sort((a,b)=>Math.abs(b.y-a.y)>2?b.y-a.y:a.x-b.x);
- const lines=[]; for(const it of arr){let l=lines.find(z=>Math.abs(z.y-it.y)<=2.2); if(!l){l={y:it.y,items:[]};lines.push(l)} l.items.push(it)}
- for(const l of lines)l.items.sort((a,b)=>a.x-b.x); return lines.sort((a,b)=>b.y-a.y);
-}
-function itemAt(line,re){return line.items.find(i=>re.test(i.t))}
-function starts(line){return line.items.find(i=>regRe.test(i.t))}
-function parsePage(lines,pageNo,pageW,pageH){
- const startsIdx=[]; lines.forEach((l,i)=>{if(starts(l))startsIdx.push(i)}); const recs=[];
- for(let z=0;z<startsIdx.length;z++){
-  const a=startsIdx[z], b=z+1<startsIdx.length?startsIdx[z+1]:lines.length; const block=lines.slice(a,b).filter(l=>!l.items.some(i=>/^Page \d+ of/i.test(i.t)||/^Index Report/i.test(i.t)||/^District\s*:/i.test(i.t)));
-  const ri=starts(block[0]); if(!ri)continue; const m=ri.t.match(regRe); const head=block[0].items;
-  // Fixed report bands inferred from actual Index Report layout; scaled by page width.
-  const sx=pageW/842; const bands={v:[145*sx,235*sx],area:[200*sx,315*sx],txn:[300*sx,405*sx],market:[395*sx,490*sx],deed:[455*sx,575*sx],party:545*sx,address:735*sx};
-  const texts=(lo,hi)=>head.filter(i=>i.x>=lo&&i.x<hi&&i!==ri).map(i=>i.t).join(' ');
-  let area=texts(bands.area[0],bands.area[1]); let txn=texts(bands.txn[0],bands.txn[1]); let market=texts(bands.market[0],bands.market[1]);
-  // area recognizer wins over accidental band overlap
-  const allHead=head.map(i=>i.t); const ai=allHead.findIndex(t=>/^(?:\d+(?:\.\d+)?)$/.test(t));
-  const areaToken=head.find(i=>/\b(?:SY|SQ\.?\s*YD|KANAL|MARLA|ACRE|K|M)\b/i.test(i.t));
-  if(areaToken){const prev=head.filter(i=>i.x<areaToken.x).slice(-1)[0]; area=clean((prev&&/^\d/.test(prev.t)?prev.t+' ':'')+areaToken.t)}
-  const nums=head.filter(i=>i.x>ri.x+ri.w&&/^\d+(?:\.\d+)?$/.test(i.t)&&(!area.includes(i.t)||i.t==='0'));
-  if(nums.length){txn=nums[0]?.t||''; market=nums[1]?.t||''}
-  let deedParts=head.filter(i=>i.x>=bands.deed[0]&&i.x<bands.party).map(i=>i.t);
-  // continuation deed words on following lines before first party label
-  for(let k=1;k<Math.min(block.length,5);k++){const li=block[k]; if(li.items.some(i=>/^(First Party|Second Party|Witness)\s*:/i.test(i.t)))break; deedParts.push(...li.items.filter(i=>i.x>=bands.deed[0]&&i.x<bands.party).map(i=>i.t))}
-  let deed=deedFix(deedParts.join(' '));
-  const parties={first:[],second:[],witness:[]}; let cur=null;
-  for(const line of block){
-    const label=line.items.find(i=>/^(First Party|Second Party|Witness)\s*:/i.test(i.t));
-    if(label){const typ=/^First/i.test(label.t)?'first':/^Second/i.test(label.t)?'second':'witness'; const after=line.items.filter(i=>i.x>=label.x+label.w-2); const addr=line.items.filter(i=>i.x>=bands.address); const name=after.filter(i=>i.x<bands.address).map(i=>i.t).join(' ').replace(/^(First Party|Second Party|Witness)\s*:\s*/i,''); cur={type:typ,name:clean(name),address:clean(addr.map(i=>i.t).join(' ')),page:pageNo,yTop:line.y,yBottom:line.y-18,bad:false}; parties[typ].push(cur); continue}
-    if(cur){const vals=line.items.filter(i=>i.x>=bands.party); if(!vals.length)continue; const ad=vals.filter(i=>i.x>=bands.address).map(i=>i.t); const nm=vals.filter(i=>i.x<bands.address).map(i=>i.t); if(nm.length)cur.name=clean(cur.name+' '+nm.join(' ')); if(ad.length)cur.address=clean(cur.address+' '+ad.join(' ')); cur.yBottom=Math.min(cur.yBottom,line.y-8)}
-  }
-  for(const typ of ['first','second','witness'])for(const p of parties[typ])p.bad=badHindi(p.name);
-  recs.push({registry:m[1],year:m[2],book:m[3],village:clean(texts(bands.v[0],bands.v[1])).replace(area,'').trim(),area:clean(area),txn:clean(txn),market:clean(market),deed,first:parties.first,second:parties.second,witness:parties.witness,pages:[pageNo],pageW,pageH});
- }
- return recs;
-}
-function sameCore(a,b){return a.registry===b.registry&&a.year===b.year&&a.book===b.book&&clean(a.deed).toUpperCase()===clean(b.deed).toUpperCase()}
-function mergeRecords(all){const out=[]; for(const r of all){let x=out.find(q=>sameCore(q,r)); if(!x){out.push(r);continue} x.pages=[...new Set([...x.pages,...r.pages])]; if(r.area&&!x.area.split(' + ').includes(r.area))x.area=clean(x.area+(x.area?' + ':'')+r.area); if(!x.village&&r.village)x.village=r.village; if(!x.txn&&r.txn)x.txn=r.txn; if(!x.market&&r.market)x.market=r.market; for(const k of ['first','second','witness'])for(const p of r[k])if(!x[k].some(q=>clean(q.name+' '+q.address).toLowerCase()===clean(p.name+' '+p.address).toLowerCase()))x[k].push(p)} return out}
-async function ensureOCR(){if(!ocrWorker){ocrWorker=await Tesseract.createWorker(['hin','eng'],1,{logger:m=>{if(m.status==='recognizing text')$('msg').textContent='Hindi OCR: '+Math.round((m.progress||0)*100)+'%'}})}return ocrWorker}
-async function fixHindiSelective(records){
- const byPage=new Map(); records.forEach(r=>['first','second','witness'].forEach(k=>r[k].forEach(p=>{if(p.bad){if(!byPage.has(p.page))byPage.set(p.page,[]);byPage.get(p.page).push(p)}})));
- if(!byPage.size)return; const worker=await ensureOCR(); let done=0;
- for(const [pn,fields] of byPage){if(STOP)break; const page=await pdfDoc.getPage(pn); const vp=page.getViewport({scale:1.65}); const canvas=document.createElement('canvas');canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height); await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
-  // One OCR call per affected page, party-details region only.
-  const x0=Math.floor(vp.width*0.62), crop=document.createElement('canvas'); crop.width=vp.width-x0;crop.height=vp.height;crop.getContext('2d').drawImage(canvas,x0,0,crop.width,crop.height,0,0,crop.width,crop.height);
-  const res=await worker.recognize(crop); const words=res.data.words||[];
-  for(const f of fields){const pdfH=f.pageH||510; const scale=vp.height/pdfH; const top=(pdfH-f.yTop-8)*scale, bottom=(pdfH-f.yBottom+8)*scale; const picked=words.filter(w=>{const cy=(w.bbox.y0+w.bbox.y1)/2; return cy>=top&&cy<=bottom && w.confidence>=35}).sort((a,b)=>Math.abs(a.bbox.y0-b.bbox.y0)>8?a.bbox.y0-b.bbox.y0:a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' '); const c=clean(picked).replace(/^(First Party|Second Party|Witness)\s*:?\s*/i,''); if(c&&(/[\u0900-\u097F]/.test(c)||c.length>2))f.name=c; f.bad=badHindi(f.name)}
-  done++; $('msg').textContent=`Hindi fix ${done}/${byPage.size} affected pages`; await new Promise(r=>setTimeout(r,0));
- }
-}
-function toRows(records){let mf=0,ms=0,mw=0;records.forEach(r=>{mf=Math.max(mf,r.first.length);ms=Math.max(ms,r.second.length);mw=Math.max(mw,r.witness.length)});return records.map(r=>{const o={'Registry No':r.registry,'Registry Year':r.year,'Book No':r.book,'Village':r.village,'Area':r.area,'Transaction Value':r.txn,'Market Value':r.market,'Deed Name':r.deed}; for(let i=0;i<mf;i++){o[`First Party ${i+1}`]=r.first[i]?.name||'';o[`First Party ${i+1} Address`]=r.first[i]?.address||''}for(let i=0;i<ms;i++){o[`Second Party ${i+1}`]=r.second[i]?.name||'';o[`Second Party ${i+1} Address`]=r.second[i]?.address||''}for(let i=0;i<mw;i++){o[`Witness ${i+1}`]=r.witness[i]?.name||'';o[`Witness ${i+1} Address`]=r.witness[i]?.address||''}o['Source Pages']=r.pages.join(', ');const bad=[...r.first,...r.second,...r.witness].some(p=>p.bad);o['Review']=bad?'CHECK HINDI':'';return o})}
-$('process').onclick=async()=>{const file=$('pdfFile').files[0];if(!file){$('msg').textContent='पहले PDF चुनें।';return} STOP=false;OUT=[];$('process').disabled=true;$('stop').disabled=false;$('download').disabled=true;try{const data=new Uint8Array(await file.arrayBuffer());pdfDoc=await pdfjsLib.getDocument({data,useSystemFonts:true}).promise;$('pages').textContent=`0/${pdfDoc.numPages}`;let raw=[];for(let n=1;n<=pdfDoc.numPages;n++){if(STOP)break;const p=await pdfDoc.getPage(n),tc=await p.getTextContent(),vp=p.getViewport({scale:1});raw.push(...parsePage(groupLines(tc.items),n,vp.width,vp.height));$('pages').textContent=`${n}/${pdfDoc.numPages}`;$('rows').textContent=raw.length;$('bar').style.width=(n/pdfDoc.numPages*70)+'%';$('msg').textContent=`Fast extraction: page ${n}/${pdfDoc.numPages}`;if(n%20===0)await new Promise(r=>setTimeout(r,0))}OUT=mergeRecords(raw);$('rows').textContent=OUT.length;if(!STOP&&$('hindiFix').checked){$('msg').textContent='Selective Hindi fix शुरू…';await fixHindiSelective(OUT)}const rev=OUT.filter(r=>[...r.first,...r.second,...r.witness].some(p=>p.bad)).length;$('review').textContent=rev;$('bar').style.width=STOP?'0%':'100%';$('msg').className=rev?'warn':'ok';$('msg').textContent=STOP?'Processing रोकी गई।':`तैयार: ${OUT.length} registry rows. Hindi review: ${rev}.`; $('download').disabled=!OUT.length}catch(e){console.error(e);$('msg').textContent='Error: '+(e?.message||e)}finally{$('process').disabled=false;$('stop').disabled=true}};
-$('stop').onclick=()=>{STOP=true;$('msg').textContent='रोक रहे हैं…'};
-$('download').onclick=()=>{const rows=toRows(OUT),wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(rows);ws['!freeze']={xSplit:0,ySplit:1};ws['!autofilter']={ref:ws['!ref']};XLSX.utils.book_append_sheet(wb,ws,'Registry Data');const rr=rows.filter(r=>r.Review);if(rr.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rr),'Needs Review');XLSX.writeFile(wb,'registry-extracted-v6.xlsx')};
-</script></body></html>
 
+const $=id=>document.getElementById(id);
+let STOP=false,pdfDoc=null,RECORDS=[],RAW_RECORDS=[],ocrWorker=null;
+const OCR_CACHE=new Map();
+const REG_RE=/(\d{1,7})\s*\/\s*(\d{4}-\d{4})\s*\/\s*(\d+)/;
+
+// Index Report column boundaries measured from the actual 963.78pt report page.
+// Ratios make the same logic work if the page is proportionally scaled.
+const X={
+  REG_END:.170,
+  VILLAGE_END:.229,
+  AREA_END:.364,
+  TXN_END:.469,
+  MARKET_END:.550,
+  DEED_END:.624,
+  PARTY_START:.624,
+  FATHER_START:.781,
+  ADDRESS_START:.884
+};
+
+const clean=s=>(s||'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/\s+/g,' ').replace(/\s+([,.;:])/g,'$1').trim();
+const norm=s=>clean(s).toLowerCase();
+const uniq=(arr)=>[...new Set(arr.filter(Boolean).map(clean))];
+function badHindi(s){
+ s=s||'';
+ if(!s)return false;
+ // C1 controls, Latin-1/extended glyph artifacts and common broken Mangal extraction marks.
+ return /[\u0080-\u009f]/.test(s)||/[Ȁ-ɏǀ-ǿ]/.test(s)||/[Ĥ-ž]/.test(s)||/[]/.test(s)||/[\\]/.test(s)&&/[\u0900-\u097F]/.test(s);
+}
+function deedFix(s){
+ return clean(s)
+   .replace(/CONVEYANC\s+E/gi,'CONVEYANCE')
+   .replace(/CANCELLATI\s+ON/gi,'CANCELLATION')
+   .replace(/\bEXCHANGE\s+OF\s+PROPERTY\b/gi,'EXCHANGE OF PROPERTY')
+   .replace(/\bTRANSFER\s+OF\s+IMMOVABLE\s+PROPERTY\b/gi,'TRANSFER OF IMMOVABLE PROPERTY');
+}
+function groupLines(items){
+ const a=items.filter(i=>i.str&&i.str.trim()).map(i=>({
+   t:i.str.trim(),x:+i.transform[4],y:+i.transform[5],w:+(i.width||0),h:Math.abs(+(i.height||10))
+ })).sort((p,q)=>Math.abs(q.y-p.y)>2.2?q.y-p.y:p.x-q.x);
+ const lines=[];
+ for(const it of a){
+   let l=lines.find(z=>Math.abs(z.y-it.y)<=2.4);
+   if(!l){l={y:it.y,items:[]};lines.push(l)}
+   l.items.push(it);
+ }
+ for(const l of lines)l.items.sort((p,q)=>p.x-q.x);
+ return lines.sort((p,q)=>q.y-p.y); // PDF.js y: top rows have larger y.
+}
+function lineText(l){return clean(l.items.map(i=>i.t).join(' '))}
+function regMatch(l){return lineText(l).match(REG_RE)}
+function roleOf(l){
+ const s=lineText(l);
+ if(/\bFirst\s+Party\s*:/i.test(s))return 'first';
+ if(/\bSecond\s+Party\s*:/i.test(s))return 'second';
+ if(/\bWitness\s*:/i.test(s))return 'witness';
+ return '';
+}
+function bandText(line,w,a,b){
+ return clean(line.items.filter(i=>i.x>=w*a&&i.x<w*b).map(i=>i.t).join(' '));
+}
+function stripRole(s){return clean((s||'').replace(/\bFirst\s+Party\s*:\s*/ig,'').replace(/\bSecond\s+Party\s*:\s*/ig,'').replace(/\bWitness\s*:\s*/ig,''))}
+function appendField(obj,key,s){s=clean(s);if(!s)return;obj[key]=clean((obj[key]||'')+' '+s)}
+
+function parsePartyBlock(block,w,pageNo,pageH){
+ const P={first:[],second:[],witness:[]};
+ let cur=null;
+ for(const line of block){
+   const role=roleOf(line);
+   if(role){
+     const nameZone=stripRole(bandText(line,w,X.PARTY_START,X.FATHER_START));
+     const fatherZone=bandText(line,w,X.FATHER_START,X.ADDRESS_START);
+     const addrZone=bandText(line,w,X.ADDRESS_START,1.001);
+     cur={
+       role,name:nameZone,father:role==='witness'?'':fatherZone,address:addrZone,
+       rawName:nameZone,rawFather:role==='witness'?'':fatherZone,rawAddress:addrZone,
+       page:pageNo,pageW:w,pageH,
+       yTop:line.y+7,yBottom:line.y-9,
+       badName:false,badFather:false,badAddress:false,ocrChanged:false
+     };
+     // Witness text before Address is all treated as witness name; it has no father field in the requested output.
+     if(role==='witness'&&fatherZone)cur.name=clean(cur.name+' '+fatherZone),cur.rawName=cur.name;
+     P[role].push(cur);
+     continue;
+   }
+   if(!cur)continue;
+   // Only Party Details region can continue a party. Header/footer/left columns are ignored.
+   const vals=line.items.filter(i=>i.x>=w*X.PARTY_START);
+   if(!vals.length)continue;
+   const n=stripRole(clean(vals.filter(i=>i.x<w*X.FATHER_START).map(i=>i.t).join(' ')));
+   const f=clean(vals.filter(i=>i.x>=w*X.FATHER_START&&i.x<w*X.ADDRESS_START).map(i=>i.t).join(' '));
+   const a=clean(vals.filter(i=>i.x>=w*X.ADDRESS_START).map(i=>i.t).join(' '));
+   if(cur.role==='witness'){
+     appendField(cur,'name',clean(n+' '+f));
+     appendField(cur,'rawName',clean(n+' '+f));
+   }else{
+     appendField(cur,'name',n);appendField(cur,'rawName',n);
+     appendField(cur,'father',f);appendField(cur,'rawFather',f);
+   }
+   appendField(cur,'address',a);appendField(cur,'rawAddress',a);
+   cur.yBottom=Math.min(cur.yBottom,line.y-9);
+ }
+ for(const k of ['first','second','witness'])for(const p of P[k]){
+   p.badName=badHindi(p.name);p.badFather=badHindi(p.father);p.badAddress=badHindi(p.address);
+ }
+ return P;
+}
+
+function parsePage(lines,pageNo,w,h){
+ const starts=[];
+ lines.forEach((l,i)=>{const m=regMatch(l);if(m&&l.items.some(it=>it.x<w*X.REG_END))starts.push({i,m})});
+ const out=[];
+ for(let z=0;z<starts.length;z++){
+   const a=starts[z].i,b=z+1<starts.length?starts[z+1].i:lines.length;
+   const block=lines.slice(a,b);
+   const m=starts[z].m,head=block[0];
+   // Header values are taken strictly by report columns. No number guessing.
+   const village=bandText(head,w,X.REG_END,X.VILLAGE_END);
+   const area=bandText(head,w,X.VILLAGE_END,X.AREA_END);
+   const txn=bandText(head,w,X.AREA_END,X.TXN_END);
+   const market=bandText(head,w,X.TXN_END,X.MARKET_END);
+   // Deed continuation can be vertically below the First Party baseline (e.g. CONVEYANC / E),
+   // so collect the DeedName X-band from the entire record block.
+   const deed=deedFix(block.map(l=>bandText(l,w,X.MARKET_END,X.DEED_END)).filter(Boolean).join(' '));
+   const parties=parsePartyBlock(block,w,pageNo,h);
+   const issues=[];
+   if(!area)issues.push('AREA BLANK');
+   if(!deed)issues.push('DEED BLANK');
+   if(!parties.first.length)issues.push('FIRST PARTY BLANK');
+   out.push({
+     registry:m[1],year:m[2],book:m[3],village,areas:area?[area]:[],txns:txn?[txn]:[],markets:market?[market]:[],deeds:deed?[deed]:[],
+     first:parties.first,second:parties.second,witness:parties.witness,pages:[pageNo],issues,duplicateParts:1
+   });
+ }
+ return out;
+}
+function sameParty(a,b){return norm([a.name,a.father,a.address].join('|'))===norm([b.name,b.father,b.address].join('|'))}
+function mergePartyList(dst,src){for(const p of src)if(!dst.some(q=>sameParty(q,p)))dst.push(p)}
+function mergeRecords(raw){
+ const map=new Map(),out=[];
+ for(const r of raw){
+   const key=`${r.registry}/${r.year}/${r.book}`;
+   let x=map.get(key);
+   if(!x){map.set(key,r);out.push(r);continue}
+   x.duplicateParts++;
+   x.pages=uniq([...x.pages.map(String),...r.pages.map(String)]).map(Number);
+   x.areas=uniq([...x.areas,...r.areas]);x.txns=uniq([...x.txns,...r.txns]);x.markets=uniq([...x.markets,...r.markets]);x.deeds=uniq([...x.deeds,...r.deeds]);
+   if(!x.village&&r.village)x.village=r.village;else if(x.village&&r.village&&norm(x.village)!==norm(r.village)){x.issues.push(`VILLAGE CONFLICT: ${x.village} | ${r.village}`)}
+   mergePartyList(x.first,r.first);mergePartyList(x.second,r.second);mergePartyList(x.witness,r.witness);
+   x.issues.push(...r.issues);
+ }
+ for(const r of out){
+   if(r.txns.length>1)r.issues.push('TRANSACTION VALUE CONFLICT');
+   if(r.markets.length>1)r.issues.push('MARKET VALUE CONFLICT');
+   if(r.deeds.length>1)r.issues.push('DEED NAME CONFLICT');
+   r.issues=uniq(r.issues);
+ }
+ return out;
+}
+function allPeople(r){return [...r.first,...r.second,...r.witness]}
+function reviewCount(){return RECORDS.filter(r=>r.issues.length||allPeople(r).some(p=>p.badName||p.badFather||p.badAddress)).length}
+function conflictCount(){return RECORDS.filter(r=>r.issues.some(x=>/CONFLICT/.test(x))).length}
+function refreshStats(){
+ $('rows').textContent=RECORDS.length;$('review').textContent=reviewCount();$('conflicts').textContent=conflictCount();
+ $('hindi').disabled=!RECORDS.length||reviewCount()===0;
+ $('download').disabled=!RECORDS.length;
+}
+
+async function ensureOCR(){
+ if(!ocrWorker){
+   $('msg').className='info';$('msg').textContent='Hindi OCR engine load हो रहा है…';
+   ocrWorker=await Tesseract.createWorker(['hin','eng'],1,{logger:m=>{if(m.status==='recognizing text')$('msg').textContent=`Hindi OCR ${Math.round((m.progress||0)*100)}%`}});
+ }
+ return ocrWorker;
+}
+function wordsInRect(words,x0,x1,y0,y1){
+ const picked=words.filter(w=>{
+   const cx=(w.bbox.x0+w.bbox.x1)/2,cy=(w.bbox.y0+w.bbox.y1)/2;
+   return cx>=x0&&cx<x1&&cy>=y0&&cy<=y1&&Number(w.confidence||0)>=35;
+ }).sort((a,b)=>Math.abs(a.bbox.y0-b.bbox.y0)>7?a.bbox.y0-b.bbox.y0:a.bbox.x0-b.bbox.x0);
+ return {text:clean(picked.map(w=>w.text).join(' ')),confidence:picked.length?picked.reduce((s,w)=>s+Number(w.confidence||0),0)/picked.length:0};
+}
+function useCache(p){
+ let changed=false;
+ for(const fld of ['name','father','address']){
+   const raw=p['raw'+fld[0].toUpperCase()+fld.slice(1)]||'';
+   if(raw&&OCR_CACHE.has(raw)){p[fld]=OCR_CACHE.get(raw);changed=true}
+ }
+ if(changed){p.badName=badHindi(p.name);p.badFather=badHindi(p.father);p.badAddress=badHindi(p.address);p.ocrChanged=true}
+ return changed;
+}
+async function repairHindi(){
+ STOP=false;$('stop').disabled=false;$('process').disabled=true;$('hindi').disabled=true;$('download').disabled=true;
+ const byPage=new Map();
+ for(const r of RECORDS)for(const p of allPeople(r)){
+   useCache(p);
+   if(p.badName||p.badFather||p.badAddress){if(!byPage.has(p.page))byPage.set(p.page,[]);byPage.get(p.page).push(p)}
+ }
+ if(!byPage.size){$('msg').className='ok';$('msg').textContent='Hindi review के लिए कोई खराब field नहीं बची।';refreshStats();$('process').disabled=false;$('stop').disabled=true;return}
+ const worker=await ensureOCR();let done=0,skipped=0;
+ for(const [pn,persons] of byPage){
+   if(STOP)break;
+   persons.forEach(useCache);
+   const need=persons.filter(p=>p.badName||p.badFather||p.badAddress);
+   if(!need.length){skipped++;done++;continue}
+   const page=await pdfDoc.getPage(pn),base=page.getViewport({scale:1}),scale=1.7,vp=page.getViewport({scale});
+   const xPdf=base.width*X.PARTY_START,xPx=xPdf*scale;
+   const canvas=document.createElement('canvas');canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height);
+   await page.render({canvasContext:canvas.getContext('2d',{willReadFrequently:true}),viewport:vp}).promise;
+   const crop=document.createElement('canvas');crop.width=Math.max(1,Math.ceil(vp.width-xPx));crop.height=canvas.height;
+   crop.getContext('2d').drawImage(canvas,xPx,0,crop.width,crop.height,0,0,crop.width,crop.height);
+   const res=await worker.recognize(crop),words=res.data.words||[];
+   for(const p of need){
+     const top=Math.max(0,(base.height-p.yTop)*scale-5),bottom=Math.min(crop.height,(base.height-p.yBottom)*scale+5);
+     const fatherX=(base.width*X.FATHER_START-xPdf)*scale,addressX=(base.width*X.ADDRESS_START-xPdf)*scale;
+     const n=wordsInRect(words,0,fatherX,top,bottom);
+     const f=wordsInRect(words,fatherX,addressX,top,bottom);
+     const a=wordsInRect(words,addressX,crop.width,top,bottom);
+     if(p.badName){let t=stripRole(n.text);if(t&&n.confidence>=42){p.name=t;OCR_CACHE.set(p.rawName,t);p.ocrChanged=true}}
+     if(p.role!=='witness'&&p.badFather&&f.text&&f.confidence>=42){p.father=f.text;OCR_CACHE.set(p.rawFather,f.text);p.ocrChanged=true}
+     if(p.badAddress&&a.text&&a.confidence>=42){p.address=a.text;OCR_CACHE.set(p.rawAddress,a.text);p.ocrChanged=true}
+     p.badName=badHindi(p.name);p.badFather=badHindi(p.father);p.badAddress=badHindi(p.address);
+   }
+   done++;$('bar').style.width=(done/byPage.size*100)+'%';$('msg').className='info';$('msg').textContent=`Hindi Repair: page-set ${done}/${byPage.size} · cache ${OCR_CACHE.size} · skipped ${skipped}`;
+   await new Promise(r=>setTimeout(r,0));
+ }
+ refreshStats();$('process').disabled=false;$('stop').disabled=true;$('download').disabled=false;
+ $('msg').className=reviewCount()?'warn':'ok';$('msg').textContent=STOP?'Hindi Repair रोका गया।':`Hindi Repair पूरा। Review rows: ${reviewCount()}. Raw PDF text Excel की अलग sheet में रहेगा।`;
+}
+
+function maxCounts(){let f=0,s=0,w=0;for(const r of RECORDS){f=Math.max(f,r.first.length);s=Math.max(s,r.second.length);w=Math.max(w,r.witness.length)}return {f,s,w}}
+function buildRows(rawMode=false){
+ const M=maxCounts();return RECORDS.map(r=>{
+   const o={
+     'Registry No':r.registry,'Registry Year':r.year,'Book No':r.book,'Village':r.village,
+     'Area':r.areas.join(' | '),'Transaction Value':r.txns.join(' | '),'Market Value':r.markets.join(' | '),'Deed Name':r.deeds.join(' | ')
+   };
+   for(let i=0;i<M.f;i++){const p=r.first[i];o[`First Party ${i+1} Name`]=p?(rawMode?p.rawName:p.name):'';o[`First Party ${i+1} Father's Name`]=p?(rawMode?p.rawFather:p.father):'';o[`First Party ${i+1} Address`]=p?(rawMode?p.rawAddress:p.address):''}
+   for(let i=0;i<M.s;i++){const p=r.second[i];o[`Second Party ${i+1} Name`]=p?(rawMode?p.rawName:p.name):'';o[`Second Party ${i+1} Father's Name`]=p?(rawMode?p.rawFather:p.father):'';o[`Second Party ${i+1} Address`]=p?(rawMode?p.rawAddress:p.address):''}
+   for(let i=0;i<M.w;i++){const p=r.witness[i];o[`Witness ${i+1}`]=p?(rawMode?p.rawName:p.name):'';o[`Witness ${i+1} Address`]=p?(rawMode?p.rawAddress:p.address):''}
+   o['Area Parts']=r.duplicateParts;o['Source Pages']=r.pages.join(', ');
+   const hbad=allPeople(r).some(p=>p.badName||p.badFather||p.badAddress);
+   o['Review']=uniq([...(r.issues||[]),...(hbad?['CHECK HINDI']:[])]).join(' ; ');
+   return o;
+ })
+}
+function setWidths(ws){
+ const range=XLSX.utils.decode_range(ws['!ref']||'A1:A1'),widths=[];
+ for(let c=range.s.c;c<=range.e.c;c++){
+   let mx=10;for(let r=range.s.r;r<=Math.min(range.e.r,200);r++){const cell=ws[XLSX.utils.encode_cell({r,c})];if(cell&&cell.v!=null)mx=Math.max(mx,String(cell.v).length)}widths[c]={wch:Math.min(45,Math.max(11,mx+2))}
+ ws['!cols']=widths;ws['!autofilter']={ref:ws['!ref']};ws['!freeze']={xSplit:0,ySplit:1};
+}
+
+$('process').onclick=async()=>{
+ const file=$('pdfFile').files[0];if(!file){$('msg').className='warn';$('msg').textContent='पहले PDF चुनें।';return}
+ STOP=false;RECORDS=[];RAW_RECORDS=[];OCR_CACHE.clear();$('process').disabled=true;$('hindi').disabled=true;$('download').disabled=true;$('stop').disabled=false;$('bar').style.width='0%';
+ try{
+   $('msg').className='info';$('msg').textContent='PDF खोल रहे हैं…';
+   const data=new Uint8Array(await file.arrayBuffer());
+   pdfDoc=await pdfjsLib.getDocument({data,useSystemFonts:true,disableFontFace:false}).promise;
+   $('pages').textContent=`0/${pdfDoc.numPages}`;
+   for(let n=1;n<=pdfDoc.numPages;n++){
+     if(STOP)break;
+     const page=await pdfDoc.getPage(n),tc=await page.getTextContent({disableNormalization:true}),vp=page.getViewport({scale:1});
+     const recs=parsePage(groupLines(tc.items),n,vp.width,vp.height);RAW_RECORDS.push(...recs);
+     $('pages').textContent=`${n}/${pdfDoc.numPages}`;$('raw').textContent=RAW_RECORDS.length;$('bar').style.width=(n/pdfDoc.numPages*100)+'%';
+     $('msg').textContent=`Fast Extract: page ${n}/${pdfDoc.numPages} · raw records ${RAW_RECORDS.length}`;
+     if(n%20===0)await new Promise(r=>setTimeout(r,0));
+   }
+   RECORDS=mergeRecords(RAW_RECORDS);refreshStats();
+   $('msg').className=reviewCount()?'warn':'ok';
+   $('msg').textContent=STOP?'Processing रोकी गई।':`Fast Extract पूरा: ${RAW_RECORDS.length} report entries → ${RECORDS.length} unique registries. Hindi Review ${reviewCount()}. पहले Excel देख सकते हैं, या Hindi Repair चला सकते हैं।`;
+ }catch(e){console.error(e);$('msg').className='warn';$('msg').textContent='Error: '+(e?.message||e)}
+ finally{$('process').disabled=false;$('stop').disabled=true;refreshStats()}
+};
+$('hindi').onclick=repairHindi;
+$('stop').onclick=()=>{STOP=true;$('msg').className='warn';$('msg').textContent='रोक रहे हैं…'};
+$('download').onclick=()=>{
+ const rows=buildRows(false),rawRows=buildRows(true),wb=XLSX.utils.book_new();
+ const ws=XLSX.utils.json_to_sheet(rows);setWidths(ws);XLSX.utils.book_append_sheet(wb,ws,'Registry Data');
+ const rr=rows.filter(r=>r.Review);if(rr.length){const wr=XLSX.utils.json_to_sheet(rr);setWidths(wr);XLSX.utils.book_append_sheet(wb,wr,'Needs Review')}
+ const rw=XLSX.utils.json_to_sheet(rawRows);setWidths(rw);XLSX.utils.book_append_sheet(wb,rw,'Raw PDF Text');
+ XLSX.writeFile(wb,'registry-extracted-v7.xlsx');
+};
+</script>
+</body></html>
