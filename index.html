@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Registry PDF → Excel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="wrap">
+    <section class="card hero">
+      <h1>Registry PDF → Excel</h1>
+      <p>PDF आपके browser में process होती है। कोई PDF या निकाला गया data server पर upload/save नहीं किया जाता।</p>
+    </section>
+
+    <section class="card">
+      <label class="filebox" for="pdfFile">
+        <span class="filetitle">PDF चुनें</span>
+        <span id="fileName" class="muted">3500+ pages की text-based report भी चुन सकते हैं</span>
+        <input id="pdfFile" type="file" accept="application/pdf,.pdf" />
+      </label>
+
+      <div class="actions">
+        <button id="startBtn" class="primary" disabled>PDF Process करें</button>
+        <button id="stopBtn" class="danger" disabled>रोकें</button>
+        <button id="excelBtn" class="success" disabled>Excel Download करें</button>
+      </div>
+
+      <div id="status" class="status">PDF चुनें।</div>
+      <progress id="progress" value="0" max="100"></progress>
+      <div class="stats">
+        <span>Pages: <b id="pageStat">0/0</b></span>
+        <span>Records: <b id="recordStat">0</b></span>
+        <span>Review: <b id="reviewStat">0</b></span>
+      </div>
+    </section>
+
+    <section class="card note">
+      <h2>Excel में क्या आएगा</h2>
+      <p>Registry No, Registry Year, Book No, Village, Transaction Value, Market Value, Deed Name, First Party, Second Party, Address और Witness. <b>Area जानबूझकर नहीं लिया जाएगा।</b></p>
+      <p>किसी field का text PDF में नहीं मिला तो cell खाली रहेगा। Hindi text को code अपनी तरफ से translate/correct नहीं करता।</p>
+    </section>
+
+    <section class="card tablecard">
+      <div class="tablehead">
+        <h2>Preview</h2>
+        <button id="clearBtn" class="ghost" disabled>Clear</button>
+      </div>
+      <div class="tablewrap">
+        <table id="previewTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small">Preview में सिर्फ शुरुआती records दिखते हैं; Excel में सभी records जाएंगे।</p>
+    </section>
+  </main>
+
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
