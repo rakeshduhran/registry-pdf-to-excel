@@ -7,13 +7,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
-  <title>Registry PDF → Excel — V3</title>
+  <title>Registry PDF → Excel — V4 Hindi Safe</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main class="wrap">
     <section class="card hero">
-      <h1>Registry PDF → Excel — V3</h1>
+      <h1>Registry PDF → Excel — V4 Hindi Safe</h1>
       <p>PDF आपके browser में process होती है। कोई PDF या निकाला गया data server पर upload/save नहीं किया जाता।</p>
     </section>
 
@@ -24,6 +24,12 @@
         <input id="pdfFile" type="file" accept="application/pdf,.pdf" />
       </label>
 
+      <div style="margin:12px 0;padding:10px;border:1px solid #bbb;border-radius:10px">
+        <label style="display:flex;gap:8px;align-items:flex-start">
+          <input id="ocrMode" type="checkbox" checked style="margin-top:4px">
+          <span><b>Hindi Safe OCR</b> — केवल उन party/address/witness fields पर OCR चलेगा जिनमें PDF font से टूटे हुए अक्षर मिलें। यह mode धीमा है, पर original visual Hindi पढ़ने की कोशिश करता है।</span>
+        </label>
+      </div>
       <div class="actions">
         <button id="startBtn" class="primary" disabled>PDF Process करें</button>
         <button id="stopBtn" class="danger" disabled>रोकें</button>
@@ -42,7 +48,7 @@
     <section class="card note">
       <h2>Excel में क्या आएगा</h2>
       <p>Registry No, Registry Year, Book No, Village, Transaction Value, Market Value, Deed Name, First Party, Second Party, Address और Witness. <b>Area जानबूझकर नहीं लिया जाएगा।</b></p>
-      <p>किसी field का text PDF में नहीं मिला तो cell खाली रहेगा। Hindi text को code अपनी तरफ से translate/correct नहीं करता।</p>
+      <p>किसी field का text PDF में नहीं मिला तो cell खाली रहेगा। Hindi text को spell-correct/translate नहीं किया जाता। टूटे font वाले field में Hindi Safe OCR visual text पढ़ता है; original raw extraction Excel की दूसरी sheet में भी रखी जाती है।</p>
     </section>
 
     <section class="card tablecard">
@@ -61,6 +67,7 @@
   </main>
 
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6/dist/tesseract.min.js"></script>
   <script type="module">
 import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/pdf.worker.mjs';
@@ -78,11 +85,14 @@ const recordStat = $('recordStat');
 const reviewStat = $('reviewStat');
 const fileName = $('fileName');
 const table = $('previewTable');
+const ocrMode = $('ocrMode');
 
 let selectedFile = null;
 let rows = [];
 let stopped = false;
 let totalPages = 0;
+let ocrWorker = null;
+let rawRows = [];
 
 const HEADERS = [
   'Registry No','Registry Year','Book No','Village',
@@ -106,7 +116,7 @@ startBtn.addEventListener('click', processPdf);
 excelBtn.addEventListener('click', downloadExcel);
 
 function resetAll(){
-  rows = []; stopped = false; totalPages = 0;
+  rows = []; rawRows = []; stopped = false; totalPages = 0;
   progressEl.value = 0; pageStat.textContent = '0/0'; recordStat.textContent='0'; reviewStat.textContent='0';
   excelBtn.disabled = true; clearBtn.disabled = true;
   renderPreview();
@@ -121,9 +131,63 @@ function cleanText(s){
 }
 
 function containsSuspiciousChars(s){
-  // Do not repair/translate text. Only flag likely bad font extraction for manual review.
-  return /[\u0080-\u009F]|�/.test(s || '');
+  // Whitelist normal ASCII + Devanagari. Old broken Mangal mappings often leak
+  // Latin-Extended/C1 characters such as , Ǒ, Ē, Ȣ, Û, à, etc.
+  return /[^\u0009\u000A\u000D\u0020-\u007E\u0900-\u097F\u200B\u200C\u200D\u20B9]/.test(s || '');
 }
+
+function unionBox(items){
+  const a=(items||[]).filter(Boolean);
+  if(!a.length) return null;
+  const x0=Math.min(...a.map(i=>i.x));
+  const x1=Math.max(...a.map(i=>i.x+(i.w||0)));
+  const y0=Math.min(...a.map(i=>i.y-(i.h||10)*0.40));
+  const y1=Math.max(...a.map(i=>i.y+(i.h||10)*0.95));
+  return {x0:x0-4,x1:x1+4,y0:y0-4,y1:y1+4};
+}
+
+function stripPartyLabel(text){
+  return cleanText(String(text||'')
+    .replace(/^First\s+Party\s*[:：]?\s*/i,'')
+    .replace(/^Second\s+Party\s*[:：]?\s*/i,'')
+    .replace(/^Witness\s*[:：]?\s*/i,''));
+}
+
+async function ensureOcrWorker(){
+  if(ocrWorker) return ocrWorker;
+  if(!window.Tesseract) throw new Error('Hindi OCR library load नहीं हुई। Internet connection check करें।');
+  statusEl.textContent='Hindi OCR model (Hindi + English) पहली बार load हो रहा है…';
+  ocrWorker = await Tesseract.createWorker(['hin','eng'], 1, {
+    logger: m => {
+      if(m?.status && typeof m.progress==='number'){
+        statusEl.textContent=`Hindi OCR: ${m.status} ${Math.round(m.progress*100)}%`;
+      }
+    }
+  });
+  await ocrWorker.setParameters({ preserve_interword_spaces: '1' });
+  return ocrWorker;
+}
+
+function boxToRectangle(box, viewport){
+  if(!box) return null;
+  const p1=viewport.convertToViewportPoint(box.x0, box.y1);
+  const p2=viewport.convertToViewportPoint(box.x1, box.y0);
+  const left=Math.max(0,Math.floor(Math.min(p1[0],p2[0])));
+  const top=Math.max(0,Math.floor(Math.min(p1[1],p2[1])));
+  const right=Math.min(Math.ceil(viewport.width),Math.ceil(Math.max(p1[0],p2[0])));
+  const bottom=Math.min(Math.ceil(viewport.height),Math.ceil(Math.max(p1[1],p2[1])));
+  if(right-left<8 || bottom-top<8) return null;
+  return {left,top,width:right-left,height:bottom-top};
+}
+
+async function ocrField(canvas, viewport, box){
+  const rect=boxToRectangle(box,viewport);
+  if(!rect) return {text:'',confidence:0};
+  const worker=await ensureOcrWorker();
+  const ret=await worker.recognize(canvas,{rectangle:rect});
+  return {text:stripPartyLabel(ret?.data?.text||''), confidence:Number(ret?.data?.confidence||0)};
+}
+
 
 function makeItem(raw){
   const t = raw.transform;
@@ -193,17 +257,16 @@ function parseParties(items){
 
     if(type){
       const name = cleanText(leftText.replace(/^First\s+Party\s*:\s*/i,'').replace(/^Second\s+Party\s*:\s*/i,'').replace(/^Witness\s*:\s*/i,''));
-      current = {type, name, address:rightText};
+      current = {type, name, address:rightText, nameItems:[...left], addressItems:[...right]};
       if(type==='first') first.push(current);
       if(type==='second') second.push(current);
       if(type==='witness') witnesses.push(current);
       continue;
     }
 
-    // Wrapped lines belong to the last party/witness until another label appears.
     if(current){
-      if(leftText) current.name = cleanText(`${current.name} ${leftText}`);
-      if(rightText) current.address = cleanText(`${current.address} ${rightText}`);
+      if(leftText){ current.name = cleanText(`${current.name} ${leftText}`); current.nameItems.push(...left); }
+      if(rightText){ current.address = cleanText(`${current.address} ${rightText}`); current.addressItems.push(...right); }
     }
   }
   return {first,second,witnesses};
@@ -233,6 +296,19 @@ function parseRecord(recordItems, pageNo){
   parties.first.slice(0,4).forEach((p,idx)=>{ row[`First Party ${idx+1}`]=p.name; row[`First Party ${idx+1} Address`]=p.address; });
   parties.second.slice(0,4).forEach((p,idx)=>{ row[`Second Party ${idx+1}`]=p.name; row[`Second Party ${idx+1} Address`]=p.address; });
   parties.witnesses.slice(0,4).forEach((p,idx)=>{ row[`Witness ${idx+1}`]=cleanText(`${p.name}${p.address?' '+p.address:''}`); });
+
+  row.__ocrTargets = {};
+  parties.first.slice(0,4).forEach((p,idx)=>{
+    row.__ocrTargets[`First Party ${idx+1}`]=unionBox(p.nameItems);
+    row.__ocrTargets[`First Party ${idx+1} Address`]=unionBox(p.addressItems);
+  });
+  parties.second.slice(0,4).forEach((p,idx)=>{
+    row.__ocrTargets[`Second Party ${idx+1}`]=unionBox(p.nameItems);
+    row.__ocrTargets[`Second Party ${idx+1} Address`]=unionBox(p.addressItems);
+  });
+  parties.witnesses.slice(0,4).forEach((p,idx)=>{
+    row.__ocrTargets[`Witness ${idx+1}`]=unionBox([...(p.nameItems||[]),...(p.addressItems||[])]);
+  });
 
   const allText = recordItems.map(i=>i.str).join(' ');
   const notes=[];
@@ -282,6 +358,49 @@ function mergeSameDeedRows(inputRows){
   return [...map.values()];
 }
 
+async function applyHindiOcrToPage(page, pageRows, pageNo){
+  if(!ocrMode?.checked) return;
+  const candidates=[];
+  for(const row of pageRows){
+    for(const [header,box] of Object.entries(row.__ocrTargets||{})){
+      const value=row[header]||'';
+      if(value && containsSuspiciousChars(value) && box) candidates.push({row,header,box,raw:value});
+    }
+  }
+  if(!candidates.length) return;
+
+  // Render once per page. OCR only tiny suspicious field rectangles from this canvas.
+  const scale=3.0;
+  const viewport=page.getViewport({scale});
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.ceil(viewport.width); canvas.height=Math.ceil(viewport.height);
+  const ctx=canvas.getContext('2d',{alpha:false});
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  await page.render({canvasContext:ctx,viewport}).promise;
+
+  let n=0;
+  for(const c of candidates){
+    if(stopped) break;
+    n++;
+    statusEl.textContent=`Page ${pageNo}/${totalPages} — Hindi OCR field ${n}/${candidates.length}`;
+    try{
+      const out=await ocrField(canvas,viewport,c.box);
+      const cleaned=cleanText(out.text);
+      if(cleaned && /[\u0900-\u097F]/.test(cleaned) && !containsSuspiciousChars(cleaned) && out.confidence>=55){
+        c.row[c.header]=cleaned;
+        c.row.Review=cleanText([c.row.Review,`OCR ${c.header} (${Math.round(out.confidence)}%)`].filter(Boolean).join('; '));
+      }else{
+        c.row.Review=cleanText([c.row.Review,`OCR check ${c.header} low/uncertain (${Math.round(out.confidence)}%)`].filter(Boolean).join('; '));
+      }
+    }catch(e){
+      console.warn('OCR field failed',c.header,e);
+      c.row.Review=cleanText([c.row.Review,`OCR failed ${c.header}`].filter(Boolean).join('; '));
+    }
+    await new Promise(r=>setTimeout(r,0));
+  }
+  canvas.width=1; canvas.height=1;
+}
+
 async function processPdf(){
   if(!selectedFile) return;
   resetAll(); stopped=false;
@@ -301,6 +420,9 @@ async function processPdf(){
       const content=await page.getTextContent({includeMarkedContent:false, disableNormalization:true});
       const items=content.items.filter(x=>x.str).map(makeItem);
       const pageRows=splitPageIntoRecords(items,p);
+      // Preserve untouched PDF extraction in a separate Excel sheet before OCR fallback.
+      rawRows = mergeSameDeedRows([...rawRows, ...pageRows.map(r=>({...r}))]);
+      await applyHindiOcrToPage(page,pageRows,p);
       rows = mergeSameDeedRows([...rows, ...pageRows]);
 
       progressEl.value=Math.round((p/totalPages)*100);
@@ -325,6 +447,7 @@ async function processPdf(){
     statusEl.textContent=`Error: ${err?.message || err}`;
   }finally{
     startBtn.disabled=false; stopBtn.disabled=true;
+    if(ocrWorker){ try{ await ocrWorker.terminate(); }catch{} ocrWorker=null; }
   }
 }
 
@@ -349,6 +472,13 @@ function downloadExcel(){
   ws['!cols']=HEADERS.map(h=>({wch: h.includes('Party')||h.includes('Address')||h.includes('Witness')?28: h==='Review'?24:18}));
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Registry Data');
+  if(rawRows.length){
+    const rawClean=rawRows.map(r=>Object.fromEntries(HEADERS.map(h=>[h,r[h]??''])));
+    const rawWs=XLSX.utils.json_to_sheet(rawClean,{header:HEADERS});
+    rawWs['!freeze']={xSplit:0,ySplit:1};
+    rawWs['!cols']=ws['!cols'];
+    XLSX.utils.book_append_sheet(wb,rawWs,'Raw PDF Text');
+  }
   const base=(selectedFile?.name || 'registry').replace(/\.pdf$/i,'').replace(/[\\/:*?"<>|]+/g,'_');
   XLSX.writeFile(wb,`${base}_extracted.xlsx`,{compression:true});
 }
